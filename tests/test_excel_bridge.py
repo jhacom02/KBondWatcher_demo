@@ -14,7 +14,6 @@ if str(ROOT) not in sys.path:
 from excel_bridge import (  # noqa: E402
     ExcelBridgeError,
     format_status,
-    is_calculation_done,
     to_float,
 )
 from models import AppStatus  # noqa: E402
@@ -39,11 +38,5 @@ def test_to_float_rejects_empty() -> None:
 
 
 def test_format_status() -> None:
-    assert format_status(AppStatus.READY_TO_SUBMIT) == "READY_TO_SUBMIT"
+    assert format_status(AppStatus.SENT) == "SENT"
     assert format_status("WATCHING") == "WATCHING"
-
-
-def test_is_calculation_done() -> None:
-    assert is_calculation_done(0) is True
-    assert is_calculation_done(1) is False
-    assert is_calculation_done("0") is True

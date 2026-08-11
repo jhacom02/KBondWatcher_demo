@@ -1,5 +1,3 @@
-"""Read FORESTBOND chat text from Chrome via Windows UI Automation (no OCR)."""
-
 from __future__ import annotations
 
 import hashlib
@@ -9,11 +7,11 @@ from typing import Optional
 from pywinauto import Desktop
 from pywinauto.base_wrapper import BaseWrapper
 
-logger = logging.getLogger("forestbond_watcher")
+logger = logging.getLogger("kbond_watcher")
 
 
 class ForestBondReaderError(RuntimeError):
-    """Raised when the FORESTBOND Chrome window cannot be read."""
+    pass
 
 
 def message_fingerprint(text: str) -> str:
@@ -21,7 +19,7 @@ def message_fingerprint(text: str) -> str:
 
 
 class ForestBondReader:
-    def __init__(self, chrome_title: str = "FORESTBOND") -> None:
+    def __init__(self, chrome_title: str) -> None:
         self.chrome_title = chrome_title
         self._watermark: set[str] = set()
         self._initialized = False
@@ -30,10 +28,9 @@ class ForestBondReader:
         desktop = Desktop(backend="uia")
         needle = self.chrome_title.lower()
         matches: list[BaseWrapper] = []
-
         try:
             windows = desktop.windows()
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             raise ForestBondReaderError(
                 f"Failed to enumerate UIA desktop windows: {exc}"
             ) from exc
@@ -41,23 +38,21 @@ class ForestBondReader:
         for win in windows:
             try:
                 title = win.window_text() or ""
-            except Exception:  # noqa: BLE001
+            except Exception:
                 continue
             if needle in title.lower():
                 matches.append(win)
 
         if not matches:
             raise ForestBondReaderError(
-                f"Chrome window containing title '{self.chrome_title}' not found. "
-                "Open FORESTBOND in Chrome and retry."
+                f"Chrome window containing title '{self.chrome_title}' not found"
             )
 
-        # Prefer the largest visible window when multiple tabs/windows match.
         def _area(w: BaseWrapper) -> int:
             try:
                 rect = w.rectangle()
                 return max(0, rect.width()) * max(0, rect.height())
-            except Exception:  # noqa: BLE001
+            except Exception:
                 return 0
 
         matches.sort(key=_area, reverse=True)
@@ -67,23 +62,20 @@ class ForestBondReader:
         texts: list[BaseWrapper] = []
         try:
             documents = window.descendants(control_type="Document")
-        except Exception:  # noqa: BLE001
+        except Exception:
             documents = []
-
         roots: list[BaseWrapper] = list(documents) if documents else [window]
         for root in roots:
             try:
                 controls = root.descendants(control_type="Text")
-            except Exception as exc:  # noqa: BLE001
+            except Exception as exc:
                 logger.debug("Text descendants failed: %s", exc)
                 controls = []
             texts.extend(controls)
-
         if not texts:
-            # Broader fallback: any Text under the window.
             try:
                 texts = window.descendants(control_type="Text")
-            except Exception as exc:  # noqa: BLE001
+            except Exception as exc:
                 raise ForestBondReaderError(
                     f"Failed to enumerate Text controls: {exc}"
                 ) from exc
@@ -94,21 +86,17 @@ class ForestBondReader:
         controls = self._collect_text_controls(win)
         lines: list[str] = []
         seen: set[str] = set()
-
         for ctrl in controls:
             try:
                 raw = ctrl.window_text() or ""
-            except Exception:  # noqa: BLE001
+            except Exception:
                 continue
             for line in raw.splitlines():
                 cleaned = line.strip()
-                if not cleaned:
-                    continue
-                if cleaned in seen:
+                if not cleaned or cleaned in seen:
                     continue
                 seen.add(cleaned)
                 lines.append(cleaned)
-
         return lines
 
     def initialize_watermark(
@@ -123,7 +111,7 @@ class ForestBondReader:
             self._watermark = {message_fingerprint(line) for line in current}
         self._initialized = True
         logger.info(
-            "FORESTBOND watermark initialized | existing=%s | process_existing=%s",
+            "source watermark | existing=%s | process_existing=%s",
             len(current),
             process_existing_on_start,
         )
@@ -141,7 +129,6 @@ class ForestBondReader:
                     self._watermark.add(message_fingerprint(line))
                 return lines
             return []
-
         new_lines: list[str] = []
         for line in lines:
             fp = message_fingerprint(line)
@@ -155,23 +142,22 @@ class ForestBondReader:
         win = self.find_forestbond_window()
         try:
             title = win.window_text() or ""
-        except Exception:  # noqa: BLE001
+        except Exception:
             title = ""
         try:
             handle = int(win.handle)
-        except Exception:  # noqa: BLE001
+        except Exception:
             handle = 0
-
         controls = self._collect_text_controls(win)
         lines = self.get_visible_message_lines(window=win)
         shown = lines[: max(0, max_messages)]
-
-        report_lines = [
-            f"FORESTBOND window title: {title!r}",
-            f"HWND: 0x{handle:08X} ({handle})",
-            f"Text control count: {len(controls)}",
-            f"Recognized message lines: {len(lines)} (showing {len(shown)})",
-            "---- messages ----",
-            *shown,
-        ]
-        return "\n".join(report_lines)
+        return "\n".join(
+            [
+                f"window title: {title!r}",
+                f"HWND: 0x{handle:08X} ({handle})",
+                f"Text control count: {len(controls)}",
+                f"message lines: {len(lines)} (showing {len(shown)})",
+                "---- messages ----",
+                *shown,
+            ]
+        )

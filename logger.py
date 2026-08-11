@@ -1,5 +1,3 @@
-"""Rotating file logging for the FORESTBOND watcher."""
-
 from __future__ import annotations
 
 import logging
@@ -7,8 +5,7 @@ from logging.handlers import RotatingFileHandler
 from pathlib import Path
 from typing import Optional
 
-
-_LOGGER_NAME = "forestbond_watcher"
+_LOGGER_NAME = "kbond_watcher"
 
 
 def setup_logger(
@@ -19,17 +16,14 @@ def setup_logger(
 ) -> logging.Logger:
     path = Path(log_path)
     path.parent.mkdir(parents=True, exist_ok=True)
-
     logger = logging.getLogger(_LOGGER_NAME)
     logger.handlers.clear()
     logger.setLevel(getattr(logging, level.upper(), logging.INFO))
     logger.propagate = False
-
     formatter = logging.Formatter(
         fmt="%(asctime)s %(levelname)s %(message)s",
         datefmt="%Y-%m-%d %H:%M:%S",
     )
-
     file_handler = RotatingFileHandler(
         path,
         maxBytes=max_bytes,
@@ -38,18 +32,15 @@ def setup_logger(
     )
     file_handler.setFormatter(formatter)
     logger.addHandler(file_handler)
-
     console = logging.StreamHandler()
     console.setFormatter(formatter)
     logger.addHandler(console)
-
     return logger
 
 
 def get_logger() -> logging.Logger:
     logger = logging.getLogger(_LOGGER_NAME)
     if not logger.handlers:
-        # Fallback if setup_logger was not called yet.
         logging.basicConfig(
             level=logging.INFO,
             format="%(asctime)s %(levelname)s %(message)s",
@@ -59,5 +50,9 @@ def get_logger() -> logging.Logger:
     return logger
 
 
-def log_event(message: str, level: int = logging.INFO, logger: Optional[logging.Logger] = None) -> None:
+def log_event(
+    message: str,
+    level: int = logging.INFO,
+    logger: Optional[logging.Logger] = None,
+) -> None:
     (logger or get_logger()).log(level, message)

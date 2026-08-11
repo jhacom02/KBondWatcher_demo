@@ -3,3 +3,5 @@ pywinauto
 psutil
 python-dotenv
 pytest
+pyautogui
+pyperclip
