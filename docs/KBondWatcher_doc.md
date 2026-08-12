@@ -8,13 +8,13 @@
 
 Windows에서 다음을 **한 번(one-shot)** 수행한다.
 
-1. `SOURCE_WINDOW_TITLE`에 맞는 창(예: Chrome FORESTBOND)을 UIA로 읽어 신규 텍스트 라인을 수집한다.
+1. `SOURCE_WINDOW_TITLE` / `SOURCE_PROCESS_NAME`에 맞는 KBond 창을 읽어 신규 텍스트 라인을 수집한다.
 2. 설정된 종목(`TARGET`) 호가만 파싱한다.
 3. Excel에 수익률을 쓰고, 워크북 자동계산 결과를 기다린 뒤 P&L을 읽는다 (`Worksheet.Calculate` 호출 없음).
-4. P&L이 임계값 이상이면 `SEND_*`로 지정한 UI 창(기본: `notepad.exe` / 메모장)에 메시지를 보내고 **프로세스를 종료**한다.
+4. P&L이 임계값 이상이면 `SEND_*`로 지정한 KBond 입력란에 메시지를 보내고 **프로세스를 종료**한다.
 5. 임계값 미달이면 계속 감시한다. Excel STOP(스톱 플래그)이면 `STOPPED`로 종료한다.
 
-OCR·Selenium·K-Bond HWND 클릭·카카오톡 연동은 사용하지 않는다. 메시지 전송은 범용 UI 자동화(`SEND_*`)만 사용한다.
+OCR·Selenium·카카오톡 연동은 사용하지 않는다. 메시지 전송은 범용 UI 자동화(`SEND_*`)만 사용한다.
 
 ---
 
@@ -135,7 +135,8 @@ P&L을 J2에 넣을 때는 `int(round(pnl))`를 천단위 콤마(`#,##0`)로 포
 | 키 | 설명 |
 |----|------|
 | `TARGET` | 감시 종목 토큰 (예: `25-10`) |
-| `SOURCE_WINDOW_TITLE` | UIA 소스 창 제목 **부분 문자열** (예: `FORESTBOND`). `CHROME_TITLE` 키는 없음 |
+| `SOURCE_WINDOW_TITLE` | 소스 창 제목 **부분 문자열** (예: `K-Bond`). `CHROME_TITLE` 키는 없음 |
+| `SOURCE_PROCESS_NAME` | 선택. 프로세스명으로 창 필터 (예: `KBondMessenger.exe`) |
 | `YIELD_PREFIX` | 호가 자리수 → 수익률 변환 시 정수부 |
 | `REQUIRED_SIDE` | `ANY` / `BUY` / `SELL` |
 | `POLL_INTERVAL_MS` | 폴링 간격 (≥ 100) |
@@ -159,8 +160,8 @@ P&L을 J2에 넣을 때는 `int(round(pnl))`를 천단위 콤마(`#,##0`)로 포
 
 | 키 | 설명 |
 |----|------|
-| `SEND_PROCESS_NAME` | 대상 프로세스 (기본 운영 예: `notepad.exe`) |
-| `SEND_WINDOW_TITLE` | 창 제목 부분 문자열 (기본 운영 예: `메모장`) |
+| `SEND_PROCESS_NAME` | 대상 프로세스 (예: `KBondMessenger.exe`) |
+| `SEND_WINDOW_TITLE` | 창 제목 부분 문자열 (예: `K-Bond`) |
 | `MESSAGE_TEMPLATE` | `str.format` 템플릿 |
 | `SEND_INPUT_X` / `SEND_INPUT_Y` | 창 `GetWindowRect` 대비 입력란 클릭 비율 (0~1) |
 | `SEND_FOREGROUND_RETRY_PAUSE_SECONDS` | 포그라운드 재시도 대기 |
@@ -227,7 +228,7 @@ P&L을 J2에 넣을 때는 `int(round(pnl))`를 천단위 콤마(`#,##0`)로 포
 
 ## 7. UIA 소스 읽기 (`source_reader.py`)
 
-이 모듈은 Chrome/FORESTBOND에 한정된 API 이름을 쓰지 않는다. 창 제목 부분 문자열(`SOURCE_WINDOW_TITLE`)로 소스를 찾고, UIA `Text` 컨트롤에서만 문자열을 모은다.
+이 모듈은 특정 앱 API 이름에 묶이지 않는다. Win32로 창(제목·선택적 프로세스)을 찾은 뒤 UIA `Text`/`ListItem` 등을 모으고, 비어 있으면 Win32 텍스트로 보완한다.
 
 ### 7.1 원리
 
@@ -358,7 +359,7 @@ triggered  ⇔  pnl >= PNL_THRESHOLD
 ## 11. 범용 UI 전송 (`send_ui.py`)
 
 카카오톡 API·방 검색·채팅 탭 클릭은 **없다**.  
-`SEND_PROCESS_NAME` / `SEND_WINDOW_TITLE`으로 지정한 창에 붙여넣기 후 Enter한다. 운영 기본은 Notepad(`notepad.exe`, 제목 `메모장`).
+`SEND_PROCESS_NAME` / `SEND_WINDOW_TITLE`으로 지정한 창에 붙여넣기 후 Enter한다. 운영 기본은 KBond Messenger(`KBondMessenger.exe`, 제목 `K-Bond`).
 
 대상 프로세스가 **이미 실행 중**이어야 한다. 없으면 `SendError`로 즉시 실패한다 (자동 실행 없음).
 
@@ -434,7 +435,7 @@ pythonw.exe "<MAIN_PATH>" --config "<CONFIG_PATH>"
 
 1. Windows + Excel이 대상 워크북을 **연 상태**, 계산 옵션은 Automatic.
 2. 소스 창이 열려 있고, 창 제목에 `SOURCE_WINDOW_TITLE`이 포함됨.
-3. 전송 대상 앱이 실행 중이고, 창 제목에 `SEND_WINDOW_TITLE`이 포함됨 (기본: 메모장).
+3. 전송 대상 앱이 실행 중이고, 창 제목에 `SEND_WINDOW_TITLE`이 포함됨 (기본: K-Bond Messenger).
 4. `.env` 완비, VBA 경로·스톱 플래그·상태 셀이 `.env`와 일치.
 5. `pip install -r requirements.txt` (pywin32, pywinauto, psutil, python-dotenv, pyautogui, pyperclip, pytest).
 
@@ -461,7 +462,7 @@ pytest -q
 | `tests/test_excel_bridge.py` | 브릿지 유틸/동작 |
 | `tests/test_send_ui.py` | 좌표·창 매칭 등 센더 단위 |
 
-UI/실기 Excel·메모장 전송은 자동화 테스트 범위 밖이며, CLI `--diagnose-source` / `--diagnose-send` / `--test-send`로 확인한다.
+UI/실기 Excel·KBond 전송은 자동화 테스트 범위 밖이며, CLI `--diagnose-source` / `--diagnose-send` / `--test-send`로 확인한다.
 
 ---
 

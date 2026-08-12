@@ -44,6 +44,7 @@ def _require_ratio(value: float, key: str) -> float:
 class Config:
     target: str
     source_window_title: str
+    source_process_name: str
     yield_prefix: float
     required_side: str
     poll_interval_ms: int
@@ -111,6 +112,7 @@ class Config:
         source_window_title = require("SOURCE_WINDOW_TITLE")
         if not source_window_title:
             raise ConfigError("SOURCE_WINDOW_TITLE must not be empty")
+        source_process_name = optional("SOURCE_PROCESS_NAME").strip()
 
         yield_prefix = _parse_float(require("YIELD_PREFIX"), "YIELD_PREFIX")
 
@@ -208,6 +210,7 @@ class Config:
         return cls(
             target=target,
             source_window_title=source_window_title,
+            source_process_name=source_process_name,
             yield_prefix=yield_prefix,
             required_side=required_side,
             poll_interval_ms=poll_interval_ms,

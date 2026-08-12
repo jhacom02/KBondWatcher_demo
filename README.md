@@ -1,6 +1,6 @@
 # KBondWatcher
 
-One-shot watcher: UIA source (`SOURCE_WINDOW_TITLE`) → Excel auto-calc → threshold → UI send (`SEND_*`, default Notepad).
+One-shot watcher: UIA/Win32 source (`SOURCE_*`, KBond Messenger) → Excel auto-calc → threshold → UI send (`SEND_*`, KBond).
 
 ## Install
 
@@ -11,14 +11,14 @@ python -m venv .venv
 pip install -r requirements.txt
 ```
 
-Edit `.env`. Open Notepad (and FORESTBOND Chrome) before send/read tests.
+Edit `.env`. Keep **K-Bond Messenger** running before send/read tests.
 
 ## Flow
 
 1. Excel START → `pythonw main.py --config .env`
-2. Source chat via UIA (`SOURCE_WINDOW_TITLE`, e.g. FORESTBOND)
+2. Source chat via `SOURCE_WINDOW_TITLE` / `SOURCE_PROCESS_NAME` (default: `K-Bond` / `KBondMessenger.exe`)
 3. Parse TARGET quote → write Excel input → auto-calc → read P&L
-4. If `pnl >= PNL_THRESHOLD` → target window click → paste `MESSAGE_TEMPLATE` → Enter → exit
+4. If `pnl >= PNL_THRESHOLD` → KBond input click → paste `MESSAGE_TEMPLATE` → Enter → exit
 
 ## Diagnose
 
@@ -34,7 +34,7 @@ pytest -q
 
 | File | Role |
 |------|------|
-| `source_reader.py` / `quote_parser.py` | UIA source + quote parse |
+| `source_reader.py` / `quote_parser.py` | source window + quote parse |
 | `excel_bridge.py` | input / auto-calc read |
 | `trigger.py` | threshold + message template |
 | `send_ui.py` | generic UI send (`SEND_*`) |

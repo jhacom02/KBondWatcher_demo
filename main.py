@@ -40,7 +40,10 @@ def build_arg_parser() -> argparse.ArgumentParser:
 
 
 def run_diagnose_source(cfg: Config) -> int:
-    reader = SourceReader(source_window_title=cfg.source_window_title)
+    reader = SourceReader(
+        source_window_title=cfg.source_window_title,
+        source_process_name=cfg.source_process_name,
+    )
     print(reader.diagnose(max_messages=200))
     return 0
 
@@ -100,7 +103,10 @@ def run_watcher(cfg: Config) -> int:
         session.status = AppStatus.WATCHING
         log.info("WATCHING")
 
-        reader = SourceReader(source_window_title=cfg.source_window_title)
+        reader = SourceReader(
+            source_window_title=cfg.source_window_title,
+            source_process_name=cfg.source_process_name,
+        )
         reader.find_source_window()
         reader.initialize_watermark(cfg.process_existing_on_start)
         poll_sec = cfg.poll_interval_ms / 1000.0
