@@ -43,7 +43,7 @@ def _require_ratio(value: float, key: str) -> float:
 @dataclass(frozen=True)
 class Config:
     target: str
-    chrome_title: str
+    read_window_title: str
     yield_prefix: float
     required_side: str
     poll_interval_ms: int
@@ -59,29 +59,17 @@ class Config:
     excel_last_action_cell: str
     pnl_threshold: float
 
-    kakao_process_name: str
-    kakao_window_class: str
-    kakao_main_title: str
-    kakao_room_name: str
+    send_process_name: str
+    send_window_title: str
     message_template: str
-    kakao_chat_tab_x: float
-    kakao_chat_tab_y: float
-    kakao_input_x: float
-    kakao_input_y: float
-    kakao_room_window_wait_seconds: float
-    kakao_foreground_retry_pause_seconds: float
-    kakao_window_poll_interval_seconds: float
-    kakao_activate_show_pause_seconds: float
-    kakao_after_activate_pause_seconds: float
-    kakao_chat_tab_pause_seconds: float
-    kakao_search_open_pause_seconds: float
-    kakao_search_reset_pause_seconds: float
-    kakao_search_paste_pause_seconds: float
-    kakao_room_enter_pause_seconds: float
-    kakao_input_click_pause_seconds: float
-    kakao_paste_pause_seconds: float
-    kakao_send_pause_seconds: float
-    kakao_search_clear_backspace_count: int
+    send_input_x: float
+    send_input_y: float
+    send_foreground_retry_pause_seconds: float
+    send_activate_show_pause_seconds: float
+    send_after_activate_pause_seconds: float
+    send_input_click_pause_seconds: float
+    send_paste_pause_seconds: float
+    send_send_pause_seconds: float
 
     stop_flag_path: Path
     log_level: str
@@ -120,9 +108,9 @@ class Config:
         if not target:
             raise ConfigError("TARGET must not be empty")
 
-        chrome_title = require("CHROME_TITLE")
-        if not chrome_title:
-            raise ConfigError("CHROME_TITLE must not be empty")
+        read_window_title = require("READ_WINDOW_TITLE")
+        if not read_window_title:
+            raise ConfigError("READ_WINDOW_TITLE must not be empty")
 
         yield_prefix = _parse_float(require("YIELD_PREFIX"), "YIELD_PREFIX")
 
@@ -162,93 +150,47 @@ class Config:
 
         pnl_threshold = _parse_float(require("PNL_THRESHOLD"), "PNL_THRESHOLD")
 
-        kakao_process_name = require("KAKAO_PROCESS_NAME")
-        if not kakao_process_name:
-            raise ConfigError("KAKAO_PROCESS_NAME must not be empty")
-        kakao_window_class = require("KAKAO_WINDOW_CLASS")
-        if not kakao_window_class:
-            raise ConfigError("KAKAO_WINDOW_CLASS must not be empty")
-        kakao_main_title = require("KAKAO_MAIN_TITLE")
-        if not kakao_main_title:
-            raise ConfigError("KAKAO_MAIN_TITLE must not be empty")
-        kakao_room_name = require("KAKAO_ROOM_NAME")
-        if not kakao_room_name:
-            raise ConfigError("KAKAO_ROOM_NAME must not be empty")
+        send_process_name = require("SEND_PROCESS_NAME")
+        if not send_process_name:
+            raise ConfigError("SEND_PROCESS_NAME must not be empty")
+        send_window_title = require("SEND_WINDOW_TITLE")
+        if not send_window_title:
+            raise ConfigError("SEND_WINDOW_TITLE must not be empty")
         message_template = require("MESSAGE_TEMPLATE")
         if not message_template:
             raise ConfigError("MESSAGE_TEMPLATE must not be empty")
 
-        kakao_chat_tab_x = _require_ratio(
-            _parse_float(require("KAKAO_CHAT_TAB_X"), "KAKAO_CHAT_TAB_X"),
-            "KAKAO_CHAT_TAB_X",
+        send_input_x = _require_ratio(
+            _parse_float(require("SEND_INPUT_X"), "SEND_INPUT_X"),
+            "SEND_INPUT_X",
         )
-        kakao_chat_tab_y = _require_ratio(
-            _parse_float(require("KAKAO_CHAT_TAB_Y"), "KAKAO_CHAT_TAB_Y"),
-            "KAKAO_CHAT_TAB_Y",
-        )
-        kakao_input_x = _require_ratio(
-            _parse_float(require("KAKAO_INPUT_X"), "KAKAO_INPUT_X"),
-            "KAKAO_INPUT_X",
-        )
-        kakao_input_y = _require_ratio(
-            _parse_float(require("KAKAO_INPUT_Y"), "KAKAO_INPUT_Y"),
-            "KAKAO_INPUT_Y",
+        send_input_y = _require_ratio(
+            _parse_float(require("SEND_INPUT_Y"), "SEND_INPUT_Y"),
+            "SEND_INPUT_Y",
         )
 
-        kakao_room_window_wait_seconds = _parse_float(
-            require("KAKAO_ROOM_WINDOW_WAIT_SECONDS"), "KAKAO_ROOM_WINDOW_WAIT_SECONDS"
+        send_foreground_retry_pause_seconds = _parse_float(
+            require("SEND_FOREGROUND_RETRY_PAUSE_SECONDS"),
+            "SEND_FOREGROUND_RETRY_PAUSE_SECONDS",
         )
-        kakao_foreground_retry_pause_seconds = _parse_float(
-            require("KAKAO_FOREGROUND_RETRY_PAUSE_SECONDS"),
-            "KAKAO_FOREGROUND_RETRY_PAUSE_SECONDS",
+        send_activate_show_pause_seconds = _parse_float(
+            require("SEND_ACTIVATE_SHOW_PAUSE_SECONDS"),
+            "SEND_ACTIVATE_SHOW_PAUSE_SECONDS",
         )
-        kakao_window_poll_interval_seconds = _parse_float(
-            require("KAKAO_WINDOW_POLL_INTERVAL_SECONDS"),
-            "KAKAO_WINDOW_POLL_INTERVAL_SECONDS",
+        send_after_activate_pause_seconds = _parse_float(
+            require("SEND_AFTER_ACTIVATE_PAUSE_SECONDS"),
+            "SEND_AFTER_ACTIVATE_PAUSE_SECONDS",
         )
-        kakao_activate_show_pause_seconds = _parse_float(
-            require("KAKAO_ACTIVATE_SHOW_PAUSE_SECONDS"),
-            "KAKAO_ACTIVATE_SHOW_PAUSE_SECONDS",
+        send_input_click_pause_seconds = _parse_float(
+            require("SEND_INPUT_CLICK_PAUSE_SECONDS"),
+            "SEND_INPUT_CLICK_PAUSE_SECONDS",
         )
-        kakao_after_activate_pause_seconds = _parse_float(
-            require("KAKAO_AFTER_ACTIVATE_PAUSE_SECONDS"),
-            "KAKAO_AFTER_ACTIVATE_PAUSE_SECONDS",
+        send_paste_pause_seconds = _parse_float(
+            require("SEND_PASTE_PAUSE_SECONDS"), "SEND_PASTE_PAUSE_SECONDS"
         )
-        kakao_chat_tab_pause_seconds = _parse_float(
-            require("KAKAO_CHAT_TAB_PAUSE_SECONDS"), "KAKAO_CHAT_TAB_PAUSE_SECONDS"
+        send_send_pause_seconds = _parse_float(
+            require("SEND_SEND_PAUSE_SECONDS"), "SEND_SEND_PAUSE_SECONDS"
         )
-        kakao_search_open_pause_seconds = _parse_float(
-            require("KAKAO_SEARCH_OPEN_PAUSE_SECONDS"),
-            "KAKAO_SEARCH_OPEN_PAUSE_SECONDS",
-        )
-        kakao_search_reset_pause_seconds = _parse_float(
-            require("KAKAO_SEARCH_RESET_PAUSE_SECONDS"),
-            "KAKAO_SEARCH_RESET_PAUSE_SECONDS",
-        )
-        kakao_search_paste_pause_seconds = _parse_float(
-            require("KAKAO_SEARCH_PASTE_PAUSE_SECONDS"),
-            "KAKAO_SEARCH_PASTE_PAUSE_SECONDS",
-        )
-        kakao_room_enter_pause_seconds = _parse_float(
-            require("KAKAO_ROOM_ENTER_PAUSE_SECONDS"),
-            "KAKAO_ROOM_ENTER_PAUSE_SECONDS",
-        )
-        kakao_input_click_pause_seconds = _parse_float(
-            require("KAKAO_INPUT_CLICK_PAUSE_SECONDS"),
-            "KAKAO_INPUT_CLICK_PAUSE_SECONDS",
-        )
-        kakao_paste_pause_seconds = _parse_float(
-            require("KAKAO_PASTE_PAUSE_SECONDS"), "KAKAO_PASTE_PAUSE_SECONDS"
-        )
-        kakao_send_pause_seconds = _parse_float(
-            require("KAKAO_SEND_PAUSE_SECONDS"), "KAKAO_SEND_PAUSE_SECONDS"
-        )
-        kakao_search_clear_backspace_count = _parse_int(
-            require("KAKAO_SEARCH_CLEAR_BACKSPACE_COUNT"),
-            "KAKAO_SEARCH_CLEAR_BACKSPACE_COUNT",
-        )
-        if kakao_search_clear_backspace_count < 0:
-            raise ConfigError("KAKAO_SEARCH_CLEAR_BACKSPACE_COUNT must be >= 0")
 
         stop_flag_raw = require("STOP_FLAG_PATH")
         if not stop_flag_raw:
@@ -265,7 +207,7 @@ class Config:
 
         return cls(
             target=target,
-            chrome_title=chrome_title,
+            read_window_title=read_window_title,
             yield_prefix=yield_prefix,
             required_side=required_side,
             poll_interval_ms=poll_interval_ms,
@@ -279,29 +221,17 @@ class Config:
             excel_last_pnl_cell=excel_last_pnl_cell,
             excel_last_action_cell=excel_last_action_cell,
             pnl_threshold=pnl_threshold,
-            kakao_process_name=kakao_process_name,
-            kakao_window_class=kakao_window_class,
-            kakao_main_title=kakao_main_title,
-            kakao_room_name=kakao_room_name,
+            send_process_name=send_process_name,
+            send_window_title=send_window_title,
             message_template=message_template,
-            kakao_chat_tab_x=kakao_chat_tab_x,
-            kakao_chat_tab_y=kakao_chat_tab_y,
-            kakao_input_x=kakao_input_x,
-            kakao_input_y=kakao_input_y,
-            kakao_room_window_wait_seconds=kakao_room_window_wait_seconds,
-            kakao_foreground_retry_pause_seconds=kakao_foreground_retry_pause_seconds,
-            kakao_window_poll_interval_seconds=kakao_window_poll_interval_seconds,
-            kakao_activate_show_pause_seconds=kakao_activate_show_pause_seconds,
-            kakao_after_activate_pause_seconds=kakao_after_activate_pause_seconds,
-            kakao_chat_tab_pause_seconds=kakao_chat_tab_pause_seconds,
-            kakao_search_open_pause_seconds=kakao_search_open_pause_seconds,
-            kakao_search_reset_pause_seconds=kakao_search_reset_pause_seconds,
-            kakao_search_paste_pause_seconds=kakao_search_paste_pause_seconds,
-            kakao_room_enter_pause_seconds=kakao_room_enter_pause_seconds,
-            kakao_input_click_pause_seconds=kakao_input_click_pause_seconds,
-            kakao_paste_pause_seconds=kakao_paste_pause_seconds,
-            kakao_send_pause_seconds=kakao_send_pause_seconds,
-            kakao_search_clear_backspace_count=kakao_search_clear_backspace_count,
+            send_input_x=send_input_x,
+            send_input_y=send_input_y,
+            send_foreground_retry_pause_seconds=send_foreground_retry_pause_seconds,
+            send_activate_show_pause_seconds=send_activate_show_pause_seconds,
+            send_after_activate_pause_seconds=send_after_activate_pause_seconds,
+            send_input_click_pause_seconds=send_input_click_pause_seconds,
+            send_paste_pause_seconds=send_paste_pause_seconds,
+            send_send_pause_seconds=send_send_pause_seconds,
             stop_flag_path=stop_flag_path,
             log_level=log_level,
             log_path=log_path,

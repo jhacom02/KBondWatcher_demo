@@ -79,53 +79,19 @@ def _find_best(matcher: Callable[[int], bool]) -> Optional[int]:
     return max(matches, key=_rank_window)
 
 
-def _is_main_window(hwnd: int, cfg: Config, pids: set[int]) -> bool:
-    if win32gui.GetClassName(hwnd) != cfg.kakao_window_class:
-        return False
-    if not win32gui.GetWindowText(hwnd).startswith(cfg.kakao_main_title):
+def _is_target_window(hwnd: int, cfg: Config, pids: set[int]) -> bool:
+    title = win32gui.GetWindowText(hwnd) or ""
+    if cfg.send_window_title.lower() not in title.lower():
         return False
     _, pid = win32process.GetWindowThreadProcessId(hwnd)
     return int(pid) in pids
 
 
-def _is_room_window(hwnd: int, cfg: Config, room_name: str, pids: set[int]) -> bool:
-    if win32gui.GetClassName(hwnd) != cfg.kakao_window_class:
-        return False
-    title = win32gui.GetWindowText(hwnd)
-    if not title or title.startswith(cfg.kakao_main_title):
-        return False
-    _, pid = win32process.GetWindowThreadProcessId(hwnd)
-    if int(pid) not in pids:
-        return False
-    return room_name in title
-
-
-def find_main_window(cfg: Config) -> Optional[int]:
-    pids = set(_process_pids(cfg.kakao_process_name))
+def find_target_window(cfg: Config) -> Optional[int]:
+    pids = set(_process_pids(cfg.send_process_name))
     if not pids:
         return None
-    return _find_best(lambda hwnd: _is_main_window(hwnd, cfg, pids))
-
-
-def find_room_window(cfg: Config, room_name: str) -> Optional[int]:
-    pids = set(_process_pids(cfg.kakao_process_name))
-    if not pids:
-        return None
-    return _find_best(lambda hwnd: _is_room_window(hwnd, cfg, room_name, pids))
-
-
-def _wait_until(
-    predicate: Callable[[], Optional[int]],
-    timeout_seconds: float,
-    poll_seconds: float,
-) -> Optional[int]:
-    deadline = time.monotonic() + max(timeout_seconds, 0)
-    while time.monotonic() < deadline:
-        hwnd = predicate()
-        if hwnd:
-            return hwnd
-        time.sleep(max(poll_seconds, 0.05))
-    return None
+    return _find_best(lambda hwnd: _is_target_window(hwnd, cfg, pids))
 
 
 def _try_alt_foreground(hwnd: int) -> None:
@@ -169,7 +135,7 @@ def _force_foreground(hwnd: int, cfg: Config) -> bool:
             attempt(hwnd)
         except Exception:
             pass
-        time.sleep(cfg.kakao_foreground_retry_pause_seconds)
+        time.sleep(cfg.send_foreground_retry_pause_seconds)
         if win32gui.GetForegroundWindow() == hwnd:
             return True
     return False
@@ -182,20 +148,11 @@ def activate_window(hwnd: int, cfg: Config) -> None:
         win32gui.ShowWindow(hwnd, win32con.SW_RESTORE)
     else:
         win32gui.ShowWindow(hwnd, win32con.SW_SHOW)
-    time.sleep(cfg.kakao_activate_show_pause_seconds)
+    time.sleep(cfg.send_activate_show_pause_seconds)
     ok = _force_foreground(hwnd, cfg)
-    time.sleep(cfg.kakao_after_activate_pause_seconds)
+    time.sleep(cfg.send_after_activate_pause_seconds)
     if not ok:
         raise MessageSenderError(f"failed to foreground hwnd={hwnd}")
-
-
-def ensure_main_window(cfg: Config) -> int:
-    if not _is_process_running(cfg.kakao_process_name):
-        raise MessageSenderError(f"{cfg.kakao_process_name} is not running")
-    hwnd = find_main_window(cfg)
-    if hwnd:
-        return hwnd
-    raise MessageSenderError("process running but main window not found")
 
 
 def _click_ratio(hwnd: int, ratio_x: float, ratio_y: float, pause: float) -> None:
@@ -209,80 +166,55 @@ def _click_ratio(hwnd: int, ratio_x: float, ratio_y: float, pause: float) -> Non
     time.sleep(pause)
 
 
-def open_room(cfg: Config, room_name: str) -> int:
-    main_hwnd = ensure_main_window(cfg)
-    activate_window(main_hwnd, cfg)
-    _click_ratio(
-        main_hwnd,
-        cfg.kakao_chat_tab_x,
-        cfg.kakao_chat_tab_y,
-        cfg.kakao_chat_tab_pause_seconds,
+def ensure_target_window(cfg: Config) -> int:
+    if not _is_process_running(cfg.send_process_name):
+        raise MessageSenderError(f"{cfg.send_process_name} is not running")
+    hwnd = find_target_window(cfg)
+    if hwnd:
+        return hwnd
+    raise MessageSenderError(
+        f"window containing title {cfg.send_window_title!r} not found"
     )
-    pyautogui.hotkey("ctrl", "f")
-    time.sleep(cfg.kakao_search_open_pause_seconds)
-    for _ in range(cfg.kakao_search_clear_backspace_count):
-        pyautogui.press("backspace")
-        time.sleep(cfg.kakao_search_reset_pause_seconds)
 
-    pyperclip.copy(room_name)
-    pyautogui.hotkey("ctrl", "v")
-    time.sleep(cfg.kakao_search_paste_pause_seconds)
-    pyautogui.press("enter")
-    time.sleep(cfg.kakao_room_enter_pause_seconds)
 
-    room_hwnd = find_room_window(cfg, room_name)
-    if not room_hwnd:
-        room_hwnd = _wait_until(
-            lambda: find_room_window(cfg, room_name),
-            cfg.kakao_room_window_wait_seconds,
-            cfg.kakao_window_poll_interval_seconds,
-        )
-    if not room_hwnd:
-        raise MessageSenderError(f"room window not found: {room_name}")
-
-    activate_window(room_hwnd, cfg)
+def send_text(text: str, cfg: Config) -> None:
+    hwnd = ensure_target_window(cfg)
+    activate_window(hwnd, cfg)
     _click_ratio(
-        room_hwnd,
-        cfg.kakao_input_x,
-        cfg.kakao_input_y,
-        cfg.kakao_input_click_pause_seconds,
+        hwnd,
+        cfg.send_input_x,
+        cfg.send_input_y,
+        cfg.send_input_click_pause_seconds,
     )
-    return room_hwnd
-
-
-def send_text(room_name: str, text: str, cfg: Config) -> None:
-    open_room(cfg, room_name)
     pyperclip.copy(text)
     pyautogui.hotkey("ctrl", "v")
-    time.sleep(cfg.kakao_paste_pause_seconds)
+    time.sleep(cfg.send_paste_pause_seconds)
     pyautogui.press("enter")
-    time.sleep(cfg.kakao_send_pause_seconds)
-    logger.info("MESSAGE_SENT | room=%s", room_name)
+    time.sleep(cfg.send_send_pause_seconds)
+    logger.info("MESSAGE_SENT | title=%s", cfg.send_window_title)
 
 
 def diagnose(cfg: Config) -> str:
-    running = _is_process_running(cfg.kakao_process_name)
-    pids = _process_pids(cfg.kakao_process_name)
-    main_hwnd = find_main_window(cfg)
-    room_hwnd = find_room_window(cfg, cfg.kakao_room_name)
+    running = _is_process_running(cfg.send_process_name)
+    pids = _process_pids(cfg.send_process_name)
+    hwnd = find_target_window(cfg)
     lines = [
-        f"process_name={cfg.kakao_process_name!r}",
+        f"process_name={cfg.send_process_name!r}",
         f"running={running}",
         f"pids={pids}",
-        f"window_class={cfg.kakao_window_class!r}",
-        f"main_title={cfg.kakao_main_title!r}",
-        f"room_name={cfg.kakao_room_name!r}",
+        f"window_title_needle={cfg.send_window_title!r}",
+        f"input_ratio=({cfg.send_input_x}, {cfg.send_input_y})",
     ]
-    if main_hwnd:
-        lines.append(
-            f"main_hwnd=0x{main_hwnd:08X} title={win32gui.GetWindowText(main_hwnd)!r}"
+    if hwnd:
+        left, top, right, bottom = win32gui.GetWindowRect(hwnd)
+        width = right - left
+        height = bottom - top
+        click_x, click_y = relative_point(
+            left, top, width, height, cfg.send_input_x, cfg.send_input_y
         )
+        lines.append(f"hwnd=0x{hwnd:08X} title={win32gui.GetWindowText(hwnd)!r}")
+        lines.append(f"rect=({left}, {top}, {right}, {bottom})")
+        lines.append(f"click_point=({click_x}, {click_y})")
     else:
-        lines.append("main_hwnd=None")
-    if room_hwnd:
-        lines.append(
-            f"room_hwnd=0x{room_hwnd:08X} title={win32gui.GetWindowText(room_hwnd)!r}"
-        )
-    else:
-        lines.append("room_hwnd=None")
+        lines.append("hwnd=None")
     return "\n".join(lines)

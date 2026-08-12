@@ -19,14 +19,14 @@ def message_fingerprint(text: str) -> str:
 
 
 class ForestBondReader:
-    def __init__(self, chrome_title: str) -> None:
-        self.chrome_title = chrome_title
+    def __init__(self, read_window_title: str) -> None:
+        self.read_window_title = read_window_title
         self._watermark: set[str] = set()
         self._initialized = False
 
-    def find_forestbond_window(self) -> BaseWrapper:
+    def find_source_window(self) -> BaseWrapper:
         desktop = Desktop(backend="uia")
-        needle = self.chrome_title.lower()
+        needle = self.read_window_title.lower()
         matches: list[BaseWrapper] = []
         try:
             windows = desktop.windows()
@@ -45,7 +45,7 @@ class ForestBondReader:
 
         if not matches:
             raise ForestBondReaderError(
-                f"Chrome window containing title '{self.chrome_title}' not found"
+                f"window containing title '{self.read_window_title}' not found"
             )
 
         def _area(w: BaseWrapper) -> int:
@@ -82,7 +82,7 @@ class ForestBondReader:
         return texts
 
     def get_visible_message_lines(self, window: Optional[BaseWrapper] = None) -> list[str]:
-        win = window or self.find_forestbond_window()
+        win = window or self.find_source_window()
         controls = self._collect_text_controls(win)
         lines: list[str] = []
         seen: set[str] = set()
@@ -139,7 +139,7 @@ class ForestBondReader:
         return new_lines
 
     def diagnose(self, max_messages: int = 200) -> str:
-        win = self.find_forestbond_window()
+        win = self.find_source_window()
         try:
             title = win.window_text() or ""
         except Exception:

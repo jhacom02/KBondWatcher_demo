@@ -30,7 +30,7 @@ Public Sub StartKBondWatcher()
 
 Fail:
     Range(STATUS_CELL).Value = "ERROR"
-    Range(LAST_ACTION_CELL).Value = "VBA Start failed: " & Err.Description
+    Range(LAST_ACTION_CELL).Value = "VBA Error: " & Err.Description
 End Sub
 
 Public Sub StopKBondWatcher()
@@ -53,5 +53,5 @@ Public Sub StopKBondWatcher()
 
 Fail:
     Range(STATUS_CELL).Value = "ERROR"
-    Range(LAST_ACTION_CELL).Value = "VBA Stop failed: " & Err.Description
+    Range(LAST_ACTION_CELL).Value = "VBA Error: " & Err.Description
 End Sub

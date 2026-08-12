@@ -1,6 +1,6 @@
 # 플랜: 화면 읽기·메시지 전송을 KBond로 전환
 
-이 문서는 현재 `KBondWatcher`(FORESTBOND Chrome UIA 읽기 → Excel → KakaoTalk 전송)를  
+이 문서는 현재 `KBondWatcher`(UIA 읽기 `READ_WINDOW_TITLE` → Excel → 범용 UI 전송 `SEND_*`)를  
 **KBond 메신저에서 읽고 / KBond 메신저로 보내는** 구조로 바꿀 때 개발자가 따라갈 구현 플랜이다.
 
 구현 코드는 포함하지 않는다. 변경 범위·좌표·설정·검증 순서만 정의한다.
@@ -14,17 +14,17 @@
 
 | 구분 | 현재 | 전환 후 |
 |------|------|---------|
-| 메시지 소스 | Chrome FORESTBOND (`forestbond_reader.py`) | KBond 메신저 채팅 패널 |
-| 메시지 액션 | KakaoTalk (`message_sender.py`) | 동일 KBond 창의 입력란 클릭 → 붙여넣기 → Enter |
-| Excel / 파서 / 트리거 | 유지 | **유지** (`excel_bridge`, `quote_parser`, `trigger`, STATUS 4종) |
+| 메시지 소스 | UIA + `READ_WINDOW_TITLE` (예: FORESTBOND), `forestbond_reader.py` | 동일 `READ_*` 키로 KBond 창 제목·(추후) 프로세스 |
+| 메시지 액션 | `message_sender.py` + `SEND_*` (기본 메모장, 클릭→paste→Enter) | `.env`의 `SEND_*`만 KBond로 교체 |
+| Excel / 파서 / 트리거 | 유지 | **유지** |
 
 두 전환은 독립적으로 가능하다.
 
-- **Track A**: 소스만 KBond (전송은 당분간 Kakao 유지 가능)
-- **Track B**: 전송만 KBond (소스는 당분간 FORESTBOND 유지 가능)
+- **Track A**: 소스만 KBond (`READ_WINDOW_TITLE` 값·reader 구현)
+- **Track B**: 전송만 KBond (`SEND_*` 값) — **시퀀스는 이미 구현됨**
 - **Track A+B**: 둘 다 KBond (최종 권장)
 
-권장 구현 순서: **창/컨트롤 진단 → Track A → Track B → Kakao/Chrome 설정 제거**.
+권장 구현 순서: **창/컨트롤 진단 → Track A → Track B(`.env` SEND_* 교체)**.
 
 ---
 
@@ -134,26 +134,26 @@ ROI는 “우측 패널만” 좁힐 때 또는 OCR 폴백 시에만 사용한�
 
 | 현재 | 전환 후 |
 |------|---------|
-| `forestbond_reader.py` | `kbond_reader.py` (또는 reader 인터페이스 + KBond 구현) |
-| `message_sender.py` (Kakao) | `kbond_sender.py` 또는 `message_sender.py`를 KBond 전용으로 재작성 |
-| `CHROME_TITLE` 등 | `KBOND_*` 설정 키 |
-| `--diagnose-chrome` / `--diagnose-kakao` | `--diagnose-kbond-read` / `--diagnose-kbond-send` (이름은 팀 취향) |
+| `forestbond_reader.py` | `kbond_reader.py` (또는 동일 파일 개조) |
+| `message_sender.py` + `SEND_*` | 동일 유지 — `.env` 값만 KBond로 |
+| `READ_WINDOW_TITLE` | 값은 KBond 창 제목; 필요 시 `READ_PROCESS_NAME` 추가 |
+| `--diagnose-read` / `--diagnose-send` | CLI 이름 유지, 대상만 KBond |
 
 ### 3.3 `main.py` 연결 지점
 
 현재:
 
 ```text
-ForestBondReader → parse_quote_line → Excel → evaluate → message_sender.send_text(kakao)
+ForestBondReader → parse_quote_line → Excel → evaluate → message_sender.send_text(cfg)
 ```
 
 목표:
 
 ```text
-KBondReader → parse_quote_line → Excel → evaluate → kbond_sender.send_text(...)
+KBondReader → parse_quote_line → Excel → evaluate → message_sender.send_text(cfg)
 ```
 
-루프·STATUS·에러 처리 패턴은 그대로 두고 **reader / sender 호출부만** 바꾼다.
+루프·STATUS·에러 처리 패턴은 그대로 두고 **reader 구현 / `READ_*`·`SEND_*` 값**을 바꾼다.
 
 ---
 
@@ -219,7 +219,7 @@ KBOND_CHAT_TITLE=
 KBOND_READ_BACKEND=uia
 ```
 
-제거(Track A 완료 후): `CHROME_TITLE` 및 Chrome 전용 diagnose.
+제거(Track A 완료 후): `READ_WINDOW_TITLE` 및 Chrome 전용 diagnose.
 
 `config.py`에 필수 검증 추가. 코드 하드코딩 금지(현 프로젝트 규칙).
 
@@ -227,85 +227,50 @@ KBOND_READ_BACKEND=uia
 
 - `ForestBondReader` import/생성 → `KBondReader`
 - `ForestBondReaderError` → `KBondReaderError` (또는 공통 `SourceReaderError`)
-- `--diagnose-chrome` → KBond read diagnose
+- `--diagnose-read` → KBond read diagnose
 - 시작 시 `find_*` / watermark 호출은 동일 순서
 
-Excel·트리거·Kakao 전송 블록은 Track A만 할 때 건드리지 않는다.
+Excel·트리거·`SEND_*` 전송 블록은 Track A만 할 때 건드리지 않는다.
 
 ---
 
 ## 5. Track B — 메시지 전송을 KBond로
 
-### 5.1 전송 시퀀스 (확정)
+### 5.1 현황
 
-Kakao의 “방 검색 → 방 창 대기”는 **삭제**한다.  
-이미 열려 있는 우측 채팅방 입력란에 바로 보낸다.
-
-```text
-1. KBond 프로세스 실행 여부 확인 (미실행이면 ERROR, 자동 실행 없음)
-2. 메인 창 HWND 찾기 → activate / foreground
-3. 입력란 클릭: (KBOND_INPUT_X, KBOND_INPUT_Y) 비율 → pyautogui.click
-4. (선택) 기존 입력 잔여 텍스트 클리어: Ctrl+A → Backspace 또는 Escape 정책 결정
-5. 클립보드에 MESSAGE_TEMPLATE 결과 복사 → Ctrl+V
-6. Enter
-7. pause 후 SENT 처리 (main.py 기존과 동일)
-```
-
-빨간 네모가 **확정 메시지 입력란**이므로, 클릭 실패 시 다른 패널·참가자 목록으로 포커스가 가지 않게 비율을 지킨다.
-
-### 5.2 현 `message_sender.py`에서 버리는 것 / 남기는 것
-
-| 제거 | 유지·재사용 |
-|------|-------------|
-| `KAKAO_ROOM_NAME` 검색, Ctrl+F, 방 창 대기 | `relative_point`, foreground 강제 유틸 |
-| 채팅 탭 클릭 비율 | `activate_window` 패턴 |
-| 카톡 프로세스/클래스/메인 타이틀 전용 매칭 | 프로세스 PID 기반 창 필터 아이디어 |
-| `open_room` 전체 | `send_text`의 paste→Enter 골격 |
-
-새 API 예:
+전송 시퀀스는 이미 범용 `SEND_*`로 구현되어 있다.
 
 ```text
-send_text(text: str, cfg: Config) -> None
-diagnose(cfg) -> str
+1. SEND_PROCESS_NAME 실행 여부 확인
+2. SEND_WINDOW_TITLE 포함 창 찾기 → activate
+3. SEND_INPUT_X/Y 클릭
+4. Ctrl+V → Enter
 ```
 
-방 이름 인자는 불필요(고정 패널). 필요하면 나중에 `KBOND_CHAT_TITLE`로 패널 검증만 추가.
-
-### 5.3 설정 키 (Track B)
+Track B는 `.env` 교체 + 좌표 재측이다.
 
 ```env
-KBOND_PROCESS_NAME=KBond.exe
-KBOND_WINDOW_CLASS=
-KBOND_WINDOW_TITLE=KBond
-
-KBOND_INPUT_X=0.825
-KBOND_INPUT_Y=0.940
-
-KBOND_FOREGROUND_RETRY_PAUSE_SECONDS=0.1
-KBOND_ACTIVATE_SHOW_PAUSE_SECONDS=0.15
-KBOND_AFTER_ACTIVATE_PAUSE_SECONDS=0.2
-KBOND_INPUT_CLICK_PAUSE_SECONDS=0.2
-KBOND_PASTE_PAUSE_SECONDS=0.5
-KBOND_SEND_PAUSE_SECONDS=0.5
-KBOND_CLEAR_INPUT_BEFORE_SEND=true
+SEND_PROCESS_NAME=KBond.exe
+SEND_WINDOW_TITLE=KBond
+SEND_INPUT_X=0.825
+SEND_INPUT_Y=0.940
 ```
+
+스크린샷 기준 입력란 초깃값은 §2.1. `--diagnose-send` / `--test-send`로 검증.
 
 비율 키는 **0~1** 검증 (`config.py`의 `_require_ratio` 재사용).
 
-Track B 완료 후 제거: 모든 `KAKAO_*` 키, `--diagnose-kakao`, `--test-send`의 카톡 의존.
-
 `MESSAGE_TEMPLATE`은 유지 (예: `{instrument} {raw_token} ㅎㅈ`).
 
-### 5.4 포그라운드·포커스 리스크
+### 5.2 포그라운드·포커스 리스크
 
 - KBond가 다른 창에 가려지면 클릭이 빗나간다 → 전송 직전 반드시 activate.
-- 입력란 클릭 후 포커스 확인이 어려우면, 붙여넣기 전 짧은 pause + (가능하면) 잘못된 창에 paste되지 않도록 전경에 KBond인지 재확인.
-- 여러 모니터/DPI: Win32 rect와 pyautogui 좌표 체계가 어긋나면 배율 보정 검토.
+- 입력란 클릭 후 잘못된 창에 paste되지 않도록 전경·제목 확인.
+- 여러 모니터/DPI: `--diagnose-send`의 click_point 확인.
 
-### 5.5 안전장치 (권장)
+### 5.3 안전장치
 
-- `--test-send`는 실제 방에 메시지가 나간다. 진단용 prefix(`TEST `)를 붙이거나, 운영 전에 테스트 방에서만 검증.
-- 전송 전 로그에 클릭 절대좌표·창 rect를 INFO로 남긴다.
+- `--test-send`는 실제 창에 문구가 들어간다. KBond 전환 전 테스트 환경에서만 검증.
 
 ---
 
@@ -315,11 +280,11 @@ Track B 완료 후 제거: 모든 `KAKAO_*` 키, `--diagnose-kakao`, `--test-sen
 
 유지: `TARGET`, `YIELD_*`, `REQUIRED_SIDE`, `POLL_*`, `PROCESS_EXISTING_*`, `EXCEL_*`, `PNL_*`, `MESSAGE_TEMPLATE`, `STOP_*`, `LOG_*`
 
-교체: Chrome/Kakao → `KBOND_*` (섹션 4.5, 5.3)
+읽기: `READ_WINDOW_TITLE` 값/구현. 전송: `SEND_*` 값 (섹션 5).
 
 ### 6.2 `config.py`
 
-- Kakao/Chrome 필드 삭제, KBond 필드 추가
+- 읽기 모듈을 KBond UIA에 맞게 교체; `SEND_*`/`READ_WINDOW_TITLE` 키 이름은 유지 가능
 - 누락 키는 `ConfigError` (기본값 금지)
 
 ### 6.3 VBA
@@ -330,7 +295,7 @@ Track B 완료 후 제거: 모든 `KAKAO_*` 키, `--diagnose-kakao`, `--test-sen
 
 ### 6.4 문서
 
-- `KBondWatcher_doc.md` / `README.md`의 FORESTBOND·Kakao 설명을 KBond 기준으로 갱신
+- `KBondWatcher_doc.md` / `README.md`의 소스 설명을 KBond 읽기 기준으로 갱신
 - 본 플랜의 좌표·시퀀스를 운영 문서로 남기거나 요약 이관
 
 ---
@@ -356,13 +321,13 @@ Track B 완료 후 제거: 모든 `KAKAO_*` 키, `--diagnose-kakao`, `--test-sen
 
 - [ ] KBond `send_text` 구현 (클릭 → paste → Enter)
 - [ ] 스크린샷 초깃값 `0.825 / 0.940` 적용 후 실측 보정
-- [ ] `main.py` sender 교체, Kakao 경로 제거
+- [ ] `.env` `SEND_*`를 KBond로 변경 (코드 경로 유지)
 - [ ] `--test-send`가 KBond로 나가게 변경
 - [ ] 트리거 시 G2=`SENT`, 프로세스 종료 확인
 
 ### Phase 3 — 정리
 
-- [ ] `forestbond_reader.py` / Kakao 전용 코드·설정·테스트 제거 또는 미사용 표시
+- [ ] `forestbond_reader.py`를 KBond reader로 교체 또는 이름 정리
 - [ ] pytest 전부 통과
 - [ ] `KBondWatcher_doc.md` 갱신
 
@@ -390,7 +355,7 @@ Track B 완료 후 제거: 모든 `KAKAO_*` 키, `--diagnose-kakao`, `--test-sen
 | UIA에 채팅 텍스트 없음 | 자식 HWND·다른 control_type 탐색; 안 되면 별도 접근 방식 재설계 |
 | 패널 레이아웃 변경 시 좌표 이탈 | `.env` 비율만 재측정; 코드 수정 최소화 |
 | 여러 채팅방 텍스트 혼입 | `KBOND_CHAT_TITLE` 또는 ROI 필터 |
-| 숨김/최소화 KBond | activate 실패 시 `ERROR` (Kakao와 동일 정책) |
+| 숨김/최소화 KBond | activate 실패 시 `ERROR` |
 | 잘못된 창에 붙여넣기 | 전송 직전 foreground가 KBond인지 확인 |
 | 입력란에 잔여 텍스트 | `KBOND_CLEAR_INPUT_BEFORE_SEND` |
 | DPI/멀티모니터 | 실측 좌표와 Win32 rect 불일치 시 보정 |
@@ -400,7 +365,7 @@ Track B 완료 후 제거: 모든 `KAKAO_*` 키, `--diagnose-kakao`, `--test-sen
 ## 10. 완료 정의 (Definition of Done)
 
 1. FORESTBOND Chrome 없이도 신규 호가를 KBond에서 읽어 Excel 계산까지 수행한다.
-2. 트리거 시 Kakao 없이, 우측 방 입력란(빨간 네모 위치)에 확정 메시지가 전송된다.
+2. 트리거 시 우측 방 입력란(빨간 네모)에 확정 메시지가 전송된다 (`SEND_*` 교체).
 3. 입력 클릭 비율이 `.env`로만 조정 가능하고, 초깃값은 본 문서의 **0.825 / 0.940**이다.
 4. Excel STATUS는 계속 `WATCHING` / `SENT` / `STOPPED` / `ERROR`만 사용한다.
 5. 운영 PC에서 diagnose + test-send + 1회 E2E가 문서화·통과된다.

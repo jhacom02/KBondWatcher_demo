@@ -32,20 +32,20 @@ def stop_requested(path: Path) -> bool:
 def build_arg_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser()
     parser.add_argument("--config", default=".env")
-    parser.add_argument("--diagnose-chrome", action="store_true")
-    parser.add_argument("--diagnose-kakao", action="store_true")
+    parser.add_argument("--diagnose-read", action="store_true")
+    parser.add_argument("--diagnose-send", action="store_true")
     parser.add_argument("--test-send", action="store_true")
     parser.add_argument("--test-parser", metavar="LINE")
     return parser
 
 
-def run_diagnose_chrome(cfg: Config) -> int:
-    reader = ForestBondReader(chrome_title=cfg.chrome_title)
+def run_diagnose_read(cfg: Config) -> int:
+    reader = ForestBondReader(read_window_title=cfg.read_window_title)
     print(reader.diagnose(max_messages=200))
     return 0
 
 
-def run_diagnose_kakao(cfg: Config) -> int:
+def run_diagnose_send(cfg: Config) -> int:
     print(message_sender.diagnose(cfg))
     return 0
 
@@ -59,8 +59,8 @@ def run_test_send(cfg: Config) -> int:
         side="BUY",
     )
     text = format_message(cfg.message_template, sample, pnl=0.0)
-    message_sender.send_text(cfg.kakao_room_name, text, cfg)
-    print(f"sent to {cfg.kakao_room_name!r}: {text}")
+    message_sender.send_text(text, cfg)
+    print(f"sent to {cfg.send_window_title!r}: {text}")
     return 0
 
 
@@ -96,12 +96,12 @@ def run_watcher(cfg: Config) -> int:
             last_action_cell=cfg.excel_last_action_cell,
         )
         excel.connect()
-        excel.update_status(AppStatus.WATCHING, last_action="ok")
+        excel.update_status(AppStatus.WATCHING, last_action="Start Successful")
         session.status = AppStatus.WATCHING
         log.info("WATCHING")
 
-        reader = ForestBondReader(chrome_title=cfg.chrome_title)
-        reader.find_forestbond_window()
+        reader = ForestBondReader(read_window_title=cfg.read_window_title)
+        reader.find_source_window()
         reader.initialize_watermark(cfg.process_existing_on_start)
         poll_sec = cfg.poll_interval_ms / 1000.0
 
@@ -109,7 +109,7 @@ def run_watcher(cfg: Config) -> int:
             if stop_requested(cfg.stop_flag_path):
                 session.status = AppStatus.STOPPED
                 log.info("STOPPED")
-                excel.update_status(AppStatus.STOPPED, last_action="stopped")
+                excel.update_status(AppStatus.STOPPED, last_action="Stopped")
                 clear_stop_flag(cfg.stop_flag_path)
                 return 0
 
@@ -147,6 +147,7 @@ def run_watcher(cfg: Config) -> int:
                 session.status = AppStatus.CALCULATING
                 pnl = excel.write_yield_read_pnl(quote.yield_value)
                 result = evaluate(quote, pnl, cfg.pnl_threshold)
+                pnl_text = f"{int(round(pnl)):,}"
 
                 if not result.triggered:
                     session.status = AppStatus.NO_TRIGGER
@@ -157,7 +158,8 @@ def run_watcher(cfg: Config) -> int:
                         last_quote=f"{quote.instrument} {quote.raw_token}",
                         last_pnl=pnl,
                         last_action=(
-                            f"{quote.instrument} {quote.raw_token} pnl={pnl}"
+                            f"Quote Passed: {quote.instrument} {quote.raw_token} "
+                            f"(pnl={pnl_text})"
                         ),
                     )
                     log.info("WATCHING")
@@ -167,7 +169,7 @@ def run_watcher(cfg: Config) -> int:
                 log.info("TRIGGERED")
                 text = format_message(cfg.message_template, quote, pnl)
                 session.status = AppStatus.SENDING
-                message_sender.send_text(cfg.kakao_room_name, text, cfg)
+                message_sender.send_text(text, cfg)
 
                 session.status = AppStatus.SENT
                 log.info("SENT")
@@ -175,7 +177,7 @@ def run_watcher(cfg: Config) -> int:
                     AppStatus.SENT,
                     last_quote=f"{quote.instrument} {quote.raw_token}",
                     last_pnl=pnl,
-                    last_action=text[:200],
+                    last_action=f"Message Sent: {text}",
                 )
                 log.info("EXIT")
                 return 0
@@ -185,12 +187,18 @@ def run_watcher(cfg: Config) -> int:
     except (ConfigError, ExcelBridgeError, ForestBondReaderError, MessageSenderError) as exc:
         log.error("ERROR | %s", exc)
         if excel is not None:
-            excel.update_status(AppStatus.ERROR, last_action=str(exc)[:200])
+            excel.update_status(
+                AppStatus.ERROR,
+                last_action=f"Python Error: {str(exc)[:200]}",
+            )
         return 1
     except Exception as exc:
         log.exception("ERROR | unexpected: %s", exc)
         if excel is not None:
-            excel.update_status(AppStatus.ERROR, last_action=str(exc)[:200])
+            excel.update_status(
+                AppStatus.ERROR,
+                last_action=f"Python Error: {str(exc)[:200]}",
+            )
         return 1
     finally:
         if excel is not None:
@@ -208,10 +216,10 @@ def main(argv: Optional[list[str]] = None) -> int:
     setup_logger(cfg.log_path, level=cfg.log_level)
 
     try:
-        if args.diagnose_chrome:
-            return run_diagnose_chrome(cfg)
-        if args.diagnose_kakao:
-            return run_diagnose_kakao(cfg)
+        if args.diagnose_read:
+            return run_diagnose_read(cfg)
+        if args.diagnose_send:
+            return run_diagnose_send(cfg)
         if args.test_send:
             return run_test_send(cfg)
         if args.test_parser is not None:
