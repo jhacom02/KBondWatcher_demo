@@ -8,7 +8,7 @@
 
 Windows에서 다음을 **한 번(one-shot)** 수행한다.
 
-1. `READ_WINDOW_TITLE`에 맞는 창(예: Chrome FORESTBOND)을 UIA로 읽어 신규 텍스트 라인을 수집한다.
+1. `SOURCE_WINDOW_TITLE`에 맞는 창(예: Chrome FORESTBOND)을 UIA로 읽어 신규 텍스트 라인을 수집한다.
 2. 설정된 종목(`TARGET`) 호가만 파싱한다.
 3. Excel에 수익률을 쓰고, 워크북 자동계산 결과를 기다린 뒤 P&L을 읽는다 (`Worksheet.Calculate` 호출 없음).
 4. P&L이 임계값 이상이면 `SEND_*`로 지정한 UI 창(기본: `notepad.exe` / 메모장)에 메시지를 보내고 **프로세스를 종료**한다.
@@ -28,7 +28,7 @@ pythonw main.py --config .env
         │
         ├─ Config.load(.env)
         ├─ Excel COM 연결 → G2=WATCHING, J2=Start Successful
-        ├─ ForestBondReader(read_window_title=...) → find_source_window()
+        ├─ SourceReader(source_window_title=...) → find_source_window()
         ├─ initialize_watermark(PROCESS_EXISTING_ON_START)
         │
         └─ 폴링 루프 (POLL_INTERVAL_MS)
@@ -38,7 +38,7 @@ pythonw main.py --config .env
               ├─ quote_parser로 TARGET 호가 파싱 (실패/중복면 skip)
               ├─ Excel: write_yield_read_pnl (입력 쓰기 → 자동계산 → P&L 읽기)
               ├─ pnl < threshold → G2=WATCHING, H2/I2/J2 갱신 → 계속
-              └─ pnl >= threshold → message_sender.send_text → G2=SENT → exit 0
+              └─ pnl >= threshold → send_ui.send_text → G2=SENT → exit 0
 ```
 
 트리거 성공 후 재감시하지 않는다. 전송 성공 시 즉시 종료한다(one-shot SENT exit).
@@ -52,11 +52,11 @@ pythonw main.py --config .env
 | `main.py` | CLI·감시 루프 오케스트레이션 |
 | `config.py` | `.env` 로드·검증 (`Config` dataclass) |
 | `models.py` | `AppStatus`, `Quote`, `TriggerResult`, `WatcherSession` |
-| `forestbond_reader.py` | UIA 텍스트 수집·신규 라인 감지 (`READ_WINDOW_TITLE`) |
+| `source_reader.py` | UIA 텍스트 수집·신규 라인 감지 (`SOURCE_WINDOW_TITLE`) |
 | `quote_parser.py` | 채팅 라인 → `Quote` (엄격 정규식) |
 | `excel_bridge.py` | 실행 중 Excel COM: 입력/자동계산 후 P&L/상태셀 |
 | `trigger.py` | `pnl >= threshold` 판정, 메시지 템플릿 포맷 |
-| `message_sender.py` | 범용 UI 창 활성화·클릭·붙여넣기·Enter (`SEND_*`) |
+| `send_ui.py` | 범용 UI 창 활성화·클릭·붙여넣기·Enter (`SEND_*`) |
 | `logger.py` | `kbond_watcher` 로거 (파일 롤링 + 콘솔) |
 | `vba/KBondWatcher.bas` | Excel START/STOP 매크로 |
 | `tests/` | 파서·트리거·브릿지·센더 단위 테스트 |
@@ -71,7 +71,7 @@ pythonw main.py --config .env
 
 ```text
 python main.py --config .env
-python main.py --config .env --diagnose-read
+python main.py --config .env --diagnose-source
 python main.py --config .env --diagnose-send
 python main.py --config .env --test-parser "25-10 23+"
 python main.py --config .env --test-send
@@ -80,7 +80,7 @@ python main.py --config .env --test-send
 | 옵션 | 동작 |
 |------|------|
 | (기본) | `run_watcher` |
-| `--diagnose-read` | 소스 창·Text 컨트롤·메시지 라인 덤프 |
+| `--diagnose-source` | 소스 창·Text 컨트롤·메시지 라인 덤프 |
 | `--diagnose-send` | `SEND_PROCESS_NAME` / 창 HWND·클릭 좌표 진단 |
 | `--test-parser LINE` | 한 줄 파싱 결과 출력 (실패 시 exit 1) |
 | `--test-send` | 샘플 `Quote`로 템플릿 메시지 실제 전송 |
@@ -92,16 +92,16 @@ python main.py --config .env --test-send
 1. `WatcherSession(status=STARTING)` 생성 (내부 상태; Excel에는 쓰지 않음).
 2. `STOP_FLAG_PATH` 파일이 있으면 삭제 (`clear_stop_flag`).
 3. `ExcelBridge` 생성 후 `connect()` → `update_status(WATCHING, last_action="Start Successful")`.
-4. `ForestBondReader(read_window_title=cfg.read_window_title)` → `find_source_window()` → `initialize_watermark(PROCESS_EXISTING_ON_START)`.
+4. `SourceReader(source_window_title=cfg.source_window_title)` → `find_source_window()` → `initialize_watermark(PROCESS_EXISTING_ON_START)`.
 5. 무한 루프:
    - stop 파일이 있으면 `STOPPED` / `Stopped` 기록, 플래그 삭제, return `0`.
-   - `get_new_message_lines(...)` 실패(`ForestBondReaderError`) 시 경고 로그만 남기고 sleep 후 continue (프로세스는 유지).
+   - `get_new_message_lines(...)` 실패(`SourceReaderError`) 시 경고 로그만 남기고 sleep 후 continue (프로세스는 유지).
    - 각 신규 라인에 대해 `parse_quote_line` → `None`이면 skip.
    - `quote.fingerprint`(raw_line SHA1)가 세션 set에 있으면 skip, 없으면 추가.
    - 로그 `QUOTE_FOUND` → `excel.write_yield_read_pnl` → `evaluate`.
    - **미트리거**: 로그 `NO_TRIGGER`, Excel은 `WATCHING` + last_quote / last_pnl / `Quote Passed: {instrument} {raw_token} (pnl={#,##0})`.
-   - **트리거**: `format_message` → `message_sender.send_text(text, cfg)` → Excel `SENT` + `Message Sent: {text}` → return `0`.
-6. 예외(`ConfigError`, `ExcelBridgeError`, `ForestBondReaderError`, `MessageSenderError` 및 기타): Excel이 연결되어 있으면 `ERROR` + `Python Error: ...`(최대 200자), return `1`.
+   - **트리거**: `format_message` → `send_ui.send_text(text, cfg)` → Excel `SENT` + `Message Sent: {text}` → return `0`.
+6. 예외(`ConfigError`, `ExcelBridgeError`, `SourceReaderError`, `SendError` 및 기타): Excel이 연결되어 있으면 `ERROR` + `Python Error: ...`(최대 200자), return `1`.
 7. `finally`: `excel.close()` (COM `CoUninitialize`).
 
 ### 4.3 Excel에 쓰는 STATUS (트레이더용 4종)
@@ -135,7 +135,7 @@ P&L을 J2에 넣을 때는 `int(round(pnl))`를 천단위 콤마(`#,##0`)로 포
 | 키 | 설명 |
 |----|------|
 | `TARGET` | 감시 종목 토큰 (예: `25-10`) |
-| `READ_WINDOW_TITLE` | UIA 소스 창 제목 **부분 문자열** (예: `FORESTBOND`). `CHROME_TITLE` 키는 없음 |
+| `SOURCE_WINDOW_TITLE` | UIA 소스 창 제목 **부분 문자열** (예: `FORESTBOND`). `CHROME_TITLE` 키는 없음 |
 | `YIELD_PREFIX` | 호가 자리수 → 수익률 변환 시 정수부 |
 | `REQUIRED_SIDE` | `ANY` / `BUY` / `SELL` |
 | `POLL_INTERVAL_MS` | 폴링 간격 (≥ 100) |
@@ -225,9 +225,9 @@ P&L을 J2에 넣을 때는 `int(round(pnl))`를 천단위 콤마(`#,##0`)로 포
 
 ---
 
-## 7. UIA 소스 읽기 (`forestbond_reader.py`)
+## 7. UIA 소스 읽기 (`source_reader.py`)
 
-이 모듈은 Chrome/FORESTBOND에 한정된 API 이름을 쓰지 않는다. 창 제목 부분 문자열(`READ_WINDOW_TITLE`)로 소스를 찾고, UIA `Text` 컨트롤에서만 문자열을 모은다.
+이 모듈은 Chrome/FORESTBOND에 한정된 API 이름을 쓰지 않는다. 창 제목 부분 문자열(`SOURCE_WINDOW_TITLE`)로 소스를 찾고, UIA `Text` 컨트롤에서만 문자열을 모은다.
 
 ### 7.1 원리
 
@@ -240,11 +240,11 @@ Ctrl+F 검색·스크롤·클립보드 복사·OCR은 하지 않는다.
 ### 7.2 창 찾기 규칙 (`find_source_window`)
 
 1. `Desktop(backend="uia").windows()`로 창 나열.
-2. `READ_WINDOW_TITLE`이 창 제목에 **부분 포함**(대소문자 무시)되면 후보.
+2. `SOURCE_WINDOW_TITLE`이 창 제목에 **부분 포함**(대소문자 무시)되면 후보.
 3. 면적(가로×세로)이 가장 큰 창을 선택.
-4. 후보가 없으면 `ForestBondReaderError`.
+4. 후보가 없으면 `SourceReaderError`.
 
-생성자: `ForestBondReader(read_window_title=...)`.  
+생성자: `SourceReader(source_window_title=...)`.  
 감시 시작 시 `main.py`는 `find_source_window()`를 한 번 호출해 창 존재 여부를 확인한다.
 
 ### 7.3 텍스트 수집 규칙
@@ -268,7 +268,7 @@ Ctrl+F 검색·스크롤·클립보드 복사·OCR은 하지 않는다.
 
 ### 7.5 진단 (`diagnose`)
 
-`--diagnose-read` → `ForestBondReader(...).diagnose(max_messages=200)`:
+`--diagnose-source` → `SourceReader(...).diagnose(max_messages=200)`:
 
 - 창 제목, HWND
 - Text 컨트롤 수
@@ -279,12 +279,12 @@ Ctrl+F 검색·스크롤·클립보드 복사·OCR은 하지 않는다.
 | 한계 | 영향 |
 |------|------|
 | 가상화·오프스크린 메시지 | UIA에 안 잡힘 → 감시 누락 가능 |
-| 창 제목 변경 | `READ_WINDOW_TITLE` 부분 일치 실패 |
+| 창 제목 변경 | `SOURCE_WINDOW_TITLE` 부분 일치 실패 |
 | 동일 제목 다중 창 | 면적 최대 창만 선택 |
 | Document/Text 구조 변경 | 수집 실패 또는 빈 라인 |
 | 비텍스트 렌더링(이미지 전용) | UIA로 읽을 수 없음 |
 
-운영 전 `--diagnose-read`로 실제 호가 라인이 보이는지 확인한다.
+운영 전 `--diagnose-source`로 실제 호가 라인이 보이는지 확인한다.
 
 ---
 
@@ -355,12 +355,12 @@ triggered  ⇔  pnl >= PNL_THRESHOLD
 
 ---
 
-## 11. 범용 UI 전송 (`message_sender.py`)
+## 11. 범용 UI 전송 (`send_ui.py`)
 
 카카오톡 API·방 검색·채팅 탭 클릭은 **없다**.  
 `SEND_PROCESS_NAME` / `SEND_WINDOW_TITLE`으로 지정한 창에 붙여넣기 후 Enter한다. 운영 기본은 Notepad(`notepad.exe`, 제목 `메모장`).
 
-대상 프로세스가 **이미 실행 중**이어야 한다. 없으면 `MessageSenderError`로 즉시 실패한다 (자동 실행 없음).
+대상 프로세스가 **이미 실행 중**이어야 한다. 없으면 `SendError`로 즉시 실패한다 (자동 실행 없음).
 
 ### `send_text(text, cfg)`
 
@@ -433,7 +433,7 @@ pythonw.exe "<MAIN_PATH>" --config "<CONFIG_PATH>"
 ## 14. 운영 전제 조건
 
 1. Windows + Excel이 대상 워크북을 **연 상태**, 계산 옵션은 Automatic.
-2. 소스 창이 열려 있고, 창 제목에 `READ_WINDOW_TITLE`이 포함됨.
+2. 소스 창이 열려 있고, 창 제목에 `SOURCE_WINDOW_TITLE`이 포함됨.
 3. 전송 대상 앱이 실행 중이고, 창 제목에 `SEND_WINDOW_TITLE`이 포함됨 (기본: 메모장).
 4. `.env` 완비, VBA 경로·스톱 플래그·상태 셀이 `.env`와 일치.
 5. `pip install -r requirements.txt` (pywin32, pywinauto, psutil, python-dotenv, pyautogui, pyperclip, pytest).
@@ -445,7 +445,7 @@ cd C:\mycode\KBondWatcher
 python -m venv .venv
 .venv\Scripts\activate
 pip install -r requirements.txt
-python main.py --config .env --diagnose-read
+python main.py --config .env --diagnose-source
 python main.py --config .env --diagnose-send
 pytest -q
 ```
@@ -459,9 +459,9 @@ pytest -q
 | `tests/test_quote_parser.py` | 수락/거부 라인, `REQUIRED_SIDE` 필터 |
 | `tests/test_trigger.py` | threshold 비교, 템플릿 포맷 |
 | `tests/test_excel_bridge.py` | 브릿지 유틸/동작 |
-| `tests/test_message_sender.py` | 좌표·창 매칭 등 센더 단위 |
+| `tests/test_send_ui.py` | 좌표·창 매칭 등 센더 단위 |
 
-UI/실기 Excel·메모장 전송은 자동화 테스트 범위 밖이며, CLI `--diagnose-read` / `--diagnose-send` / `--test-send`로 확인한다.
+UI/실기 Excel·메모장 전송은 자동화 테스트 범위 밖이며, CLI `--diagnose-source` / `--diagnose-send` / `--test-send`로 확인한다.
 
 ---
 
@@ -469,7 +469,7 @@ UI/실기 Excel·메모장 전송은 자동화 테스트 범위 밖이며, CLI `
 
 1. Excel G2: `ERROR`면 J2(`Python Error:` / `VBA Error:`) 요약 + `LOG_PATH` 로그.
 2. G2가 계속 비어 있음: Python이 안 붙음 → VBA 경로·`pythonw`·`.env` 위치.
-3. `WATCHING`인데 호가 미반응: `--diagnose-read`으로 라인이 UIA에 보이는지, `--test-parser`로 형식 일치 여부.
+3. `WATCHING`인데 호가 미반응: `--diagnose-source`으로 라인이 UIA에 보이는지, `--test-parser`로 형식 일치 여부.
 4. 계산만 되고 전송 없음: I2 P&L vs `PNL_THRESHOLD`, Excel 자동계산 여부.
 5. 전송 실패: 대상 프로세스 실행 여부, `--diagnose-send`, 클릭 비율·타이밍.
 
@@ -480,6 +480,6 @@ UI/실기 Excel·메모장 전송은 자동화 테스트 범위 밖이며, CLI `
 - **One-shot**: 전송 성공(`SENT`) 또는 STOP/ERROR로 종료.
 - **설정 외부화**: 비즈니스·좌표·타이밍은 `.env`만. `KAKAO_*` / `CHROME_TITLE` 키 없음.
 - **상태셀 단순화**: 트레이더는 G2의 `WATCHING` / `SENT` / `STOPPED` / `ERROR`만 보면 됨.
-- **소스**: `READ_WINDOW_TITLE` 창의 UIA Text만.
+- **소스**: `SOURCE_WINDOW_TITLE` 창의 UIA Text만.
 - **계산**: `write_yield_read_pnl` + Excel 자동계산 (`Worksheet.Calculate` 없음).
 - **액션**: `SEND_*` 창 활성화 → 비율 클릭 → 붙여넣기 → Enter.

@@ -7,7 +7,7 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from message_sender import relative_point  # noqa: E402
+from send_ui import relative_point  # noqa: E402
 
 
 def test_relative_point_center() -> None:

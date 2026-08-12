@@ -8,10 +8,10 @@ from typing import Optional
 
 from config import Config, ConfigError
 from excel_bridge import ExcelBridge, ExcelBridgeError
-from forestbond_reader import ForestBondReader, ForestBondReaderError
+from source_reader import SourceReader, SourceReaderError
 from logger import get_logger, setup_logger
-import message_sender
-from message_sender import MessageSenderError
+import send_ui
+from send_ui import SendError
 from models import AppStatus, Quote, WatcherSession
 from quote_parser import format_parser_result, parse_quote_line
 from trigger import evaluate, format_message
@@ -32,21 +32,21 @@ def stop_requested(path: Path) -> bool:
 def build_arg_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser()
     parser.add_argument("--config", default=".env")
-    parser.add_argument("--diagnose-read", action="store_true")
+    parser.add_argument("--diagnose-source", action="store_true")
     parser.add_argument("--diagnose-send", action="store_true")
     parser.add_argument("--test-send", action="store_true")
     parser.add_argument("--test-parser", metavar="LINE")
     return parser
 
 
-def run_diagnose_read(cfg: Config) -> int:
-    reader = ForestBondReader(read_window_title=cfg.read_window_title)
+def run_diagnose_source(cfg: Config) -> int:
+    reader = SourceReader(source_window_title=cfg.source_window_title)
     print(reader.diagnose(max_messages=200))
     return 0
 
 
 def run_diagnose_send(cfg: Config) -> int:
-    print(message_sender.diagnose(cfg))
+    print(send_ui.diagnose(cfg))
     return 0
 
 
@@ -59,7 +59,7 @@ def run_test_send(cfg: Config) -> int:
         side="BUY",
     )
     text = format_message(cfg.message_template, sample, pnl=0.0)
-    message_sender.send_text(text, cfg)
+    send_ui.send_text(text, cfg)
     print(f"sent to {cfg.send_window_title!r}: {text}")
     return 0
 
@@ -100,7 +100,7 @@ def run_watcher(cfg: Config) -> int:
         session.status = AppStatus.WATCHING
         log.info("WATCHING")
 
-        reader = ForestBondReader(read_window_title=cfg.read_window_title)
+        reader = SourceReader(source_window_title=cfg.source_window_title)
         reader.find_source_window()
         reader.initialize_watermark(cfg.process_existing_on_start)
         poll_sec = cfg.poll_interval_ms / 1000.0
@@ -117,7 +117,7 @@ def run_watcher(cfg: Config) -> int:
                 lines = reader.get_new_message_lines(
                     process_existing_on_start=cfg.process_existing_on_start
                 )
-            except ForestBondReaderError as exc:
+            except SourceReaderError as exc:
                 log.warning("source read error: %s", exc)
                 time.sleep(poll_sec)
                 continue
@@ -169,7 +169,7 @@ def run_watcher(cfg: Config) -> int:
                 log.info("TRIGGERED")
                 text = format_message(cfg.message_template, quote, pnl)
                 session.status = AppStatus.SENDING
-                message_sender.send_text(text, cfg)
+                send_ui.send_text(text, cfg)
 
                 session.status = AppStatus.SENT
                 log.info("SENT")
@@ -184,7 +184,7 @@ def run_watcher(cfg: Config) -> int:
 
             time.sleep(poll_sec)
 
-    except (ConfigError, ExcelBridgeError, ForestBondReaderError, MessageSenderError) as exc:
+    except (ConfigError, ExcelBridgeError, SourceReaderError, SendError) as exc:
         log.error("ERROR | %s", exc)
         if excel is not None:
             excel.update_status(
@@ -216,8 +216,8 @@ def main(argv: Optional[list[str]] = None) -> int:
     setup_logger(cfg.log_path, level=cfg.log_level)
 
     try:
-        if args.diagnose_read:
-            return run_diagnose_read(cfg)
+        if args.diagnose_source:
+            return run_diagnose_source(cfg)
         if args.diagnose_send:
             return run_diagnose_send(cfg)
         if args.test_send:
@@ -225,7 +225,7 @@ def main(argv: Optional[list[str]] = None) -> int:
         if args.test_parser is not None:
             return run_test_parser(cfg, args.test_parser)
         return run_watcher(cfg)
-    except (ForestBondReaderError, MessageSenderError, ExcelBridgeError, ConfigError) as exc:
+    except (SourceReaderError, SendError, ExcelBridgeError, ConfigError) as exc:
         get_logger().error("ERROR | %s", exc)
         print(f"ERROR: {exc}", file=sys.stderr)
         return 1

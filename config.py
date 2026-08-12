@@ -43,7 +43,7 @@ def _require_ratio(value: float, key: str) -> float:
 @dataclass(frozen=True)
 class Config:
     target: str
-    read_window_title: str
+    source_window_title: str
     yield_prefix: float
     required_side: str
     poll_interval_ms: int
@@ -108,9 +108,9 @@ class Config:
         if not target:
             raise ConfigError("TARGET must not be empty")
 
-        read_window_title = require("READ_WINDOW_TITLE")
-        if not read_window_title:
-            raise ConfigError("READ_WINDOW_TITLE must not be empty")
+        source_window_title = require("SOURCE_WINDOW_TITLE")
+        if not source_window_title:
+            raise ConfigError("SOURCE_WINDOW_TITLE must not be empty")
 
         yield_prefix = _parse_float(require("YIELD_PREFIX"), "YIELD_PREFIX")
 
@@ -207,7 +207,7 @@ class Config:
 
         return cls(
             target=target,
-            read_window_title=read_window_title,
+            source_window_title=source_window_title,
             yield_prefix=yield_prefix,
             required_side=required_side,
             poll_interval_ms=poll_interval_ms,

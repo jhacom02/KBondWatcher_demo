@@ -10,7 +10,7 @@ from pywinauto.base_wrapper import BaseWrapper
 logger = logging.getLogger("kbond_watcher")
 
 
-class ForestBondReaderError(RuntimeError):
+class SourceReaderError(RuntimeError):
     pass
 
 
@@ -18,20 +18,20 @@ def message_fingerprint(text: str) -> str:
     return hashlib.sha1(text.encode("utf-8")).hexdigest()
 
 
-class ForestBondReader:
-    def __init__(self, read_window_title: str) -> None:
-        self.read_window_title = read_window_title
+class SourceReader:
+    def __init__(self, source_window_title: str) -> None:
+        self.source_window_title = source_window_title
         self._watermark: set[str] = set()
         self._initialized = False
 
     def find_source_window(self) -> BaseWrapper:
         desktop = Desktop(backend="uia")
-        needle = self.read_window_title.lower()
+        needle = self.source_window_title.lower()
         matches: list[BaseWrapper] = []
         try:
             windows = desktop.windows()
         except Exception as exc:
-            raise ForestBondReaderError(
+            raise SourceReaderError(
                 f"Failed to enumerate UIA desktop windows: {exc}"
             ) from exc
 
@@ -44,8 +44,8 @@ class ForestBondReader:
                 matches.append(win)
 
         if not matches:
-            raise ForestBondReaderError(
-                f"window containing title '{self.read_window_title}' not found"
+            raise SourceReaderError(
+                f"window containing title '{self.source_window_title}' not found"
             )
 
         def _area(w: BaseWrapper) -> int:
@@ -76,7 +76,7 @@ class ForestBondReader:
             try:
                 texts = window.descendants(control_type="Text")
             except Exception as exc:
-                raise ForestBondReaderError(
+                raise SourceReaderError(
                     f"Failed to enumerate Text controls: {exc}"
                 ) from exc
         return texts

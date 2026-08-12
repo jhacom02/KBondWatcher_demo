@@ -1,6 +1,6 @@
 # KBondWatcher
 
-One-shot watcher: UIA read (`READ_WINDOW_TITLE`) → Excel auto-calc → threshold → UI send (`SEND_*`, default Notepad).
+One-shot watcher: UIA source (`SOURCE_WINDOW_TITLE`) → Excel auto-calc → threshold → UI send (`SEND_*`, default Notepad).
 
 ## Install
 
@@ -16,14 +16,14 @@ Edit `.env`. Open Notepad (and FORESTBOND Chrome) before send/read tests.
 ## Flow
 
 1. Excel START → `pythonw main.py --config .env`
-2. Read chat via UIA (`READ_WINDOW_TITLE`, e.g. FORESTBOND)
+2. Source chat via UIA (`SOURCE_WINDOW_TITLE`, e.g. FORESTBOND)
 3. Parse TARGET quote → write Excel input → auto-calc → read P&L
 4. If `pnl >= PNL_THRESHOLD` → target window click → paste `MESSAGE_TEMPLATE` → Enter → exit
 
 ## Diagnose
 
 ```bat
-python main.py --config .env --diagnose-read
+python main.py --config .env --diagnose-source
 python main.py --config .env --diagnose-send
 python main.py --config .env --test-parser "25-10 23+"
 python main.py --config .env --test-send
@@ -34,10 +34,10 @@ pytest -q
 
 | File | Role |
 |------|------|
-| `forestbond_reader.py` / `quote_parser.py` | UIA source + quote parse |
+| `source_reader.py` / `quote_parser.py` | UIA source + quote parse |
 | `excel_bridge.py` | input / auto-calc read |
 | `trigger.py` | threshold + message template |
-| `message_sender.py` | generic UI send (`SEND_*`) |
+| `send_ui.py` | generic UI send (`SEND_*`) |
 | `main.py` | orchestration |
 
 ## VBA

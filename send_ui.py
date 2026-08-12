@@ -17,7 +17,7 @@ from config import Config
 logger = logging.getLogger("kbond_watcher")
 
 
-class MessageSenderError(RuntimeError):
+class SendError(RuntimeError):
     pass
 
 
@@ -143,7 +143,7 @@ def _force_foreground(hwnd: int, cfg: Config) -> bool:
 
 def activate_window(hwnd: int, cfg: Config) -> None:
     if not hwnd or not win32gui.IsWindow(hwnd):
-        raise MessageSenderError("invalid window handle")
+        raise SendError("invalid window handle")
     if win32gui.IsIconic(hwnd):
         win32gui.ShowWindow(hwnd, win32con.SW_RESTORE)
     else:
@@ -152,7 +152,7 @@ def activate_window(hwnd: int, cfg: Config) -> None:
     ok = _force_foreground(hwnd, cfg)
     time.sleep(cfg.send_after_activate_pause_seconds)
     if not ok:
-        raise MessageSenderError(f"failed to foreground hwnd={hwnd}")
+        raise SendError(f"failed to foreground hwnd={hwnd}")
 
 
 def _click_ratio(hwnd: int, ratio_x: float, ratio_y: float, pause: float) -> None:
@@ -160,7 +160,7 @@ def _click_ratio(hwnd: int, ratio_x: float, ratio_y: float, pause: float) -> Non
     width = right - left
     height = bottom - top
     if width <= 0 or height <= 0:
-        raise MessageSenderError("invalid window size")
+        raise SendError("invalid window size")
     x, y = relative_point(left, top, width, height, ratio_x, ratio_y)
     pyautogui.click(x, y)
     time.sleep(pause)
@@ -168,11 +168,11 @@ def _click_ratio(hwnd: int, ratio_x: float, ratio_y: float, pause: float) -> Non
 
 def ensure_target_window(cfg: Config) -> int:
     if not _is_process_running(cfg.send_process_name):
-        raise MessageSenderError(f"{cfg.send_process_name} is not running")
+        raise SendError(f"{cfg.send_process_name} is not running")
     hwnd = find_target_window(cfg)
     if hwnd:
         return hwnd
-    raise MessageSenderError(
+    raise SendError(
         f"window containing title {cfg.send_window_title!r} not found"
     )
 
