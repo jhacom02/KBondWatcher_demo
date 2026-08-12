@@ -8,9 +8,9 @@ LOOKING_BID = "BID"
 
 def looking_for_from_qty(qty: float) -> tuple[str, str]:
     if abs(qty - (-100.0)) < 1e-9:
-        return LOOKING_OFFER, "BUY"
+        return LOOKING_BID, "BUY"
     if abs(qty - 100.0) < 1e-9:
-        return LOOKING_BID, "SELL"
+        return LOOKING_OFFER, "SELL"
     raise ValueError(f"qty must be -100 or +100, got {qty!r}")
 
 
@@ -34,7 +34,7 @@ def evaluate(
     looking_for: str,
 ) -> TriggerResult:
     looking = (looking_for or "").upper()
-    if looking == LOOKING_OFFER:
+    if looking == LOOKING_BID:
         if pnl >= threshold:
             return TriggerResult(
                 triggered=True,
@@ -48,7 +48,7 @@ def evaluate(
             pnl=pnl,
             quote=quote,
         )
-    if looking == LOOKING_BID:
+    if looking == LOOKING_OFFER:
         limit = -abs(threshold)
         if pnl <= limit:
             return TriggerResult(

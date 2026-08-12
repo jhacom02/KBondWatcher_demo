@@ -108,10 +108,10 @@ python main.py --config .env --test-send
 | I2 Last PnL | 마지막 P&L | 숫자 |
 | J2 Last Action | 마지막 동작 | 모두 `(HH:MM:SS) {action}` 형식. 예: `(16:15:35) Start Successful` / `(16:15:35) Quote Skipped` / `(16:15:35) Message Sent: ...` / `(16:15:35) Stopped` / `(16:15:35) Python Error: ...` |
 
-| E41 | Looking For | 수집 side | 트리거 |
-|-----|-------------|-----------|--------|
-| `-100` | `OFFER` | BUY (사자) | `pnl >= PNL_THRESHOLD` |
-| `+100` | `BID` | SELL (팔자) | `pnl <= -PNL_THRESHOLD` |
+| E qty | Looking For | 수집 side | 트리거 |
+|-------|-------------|-----------|--------|
+| `-100` (매도차익) | `BID` | BUY (사자) | `pnl >= PNL_THRESHOLD` → 팔자 확정 |
+| `+100` (매수차익) | `OFFER` | SELL (팔자) | `pnl <= -PNL_THRESHOLD` → 사자 확정 |
 
 G2에는 `OFFER` 또는 `BID`만. 활성 슬롯 방향이 섞이면 시작 에러. 로그/파서는 BUY/SELL.
 
@@ -355,8 +355,8 @@ MODE 3: FORESTBOND UIA Text 수집 (`source_reader_uia.py`, KBondWatcher 로직 
 
 | Looking For | 트리거 |
 |-------------|--------|
-| `OFFER` | `pnl >= PNL_THRESHOLD` |
-| `BID` | `pnl <= -PNL_THRESHOLD` |
+| `BID` (사자 탐색) | `pnl >= PNL_THRESHOLD` |
+| `OFFER` (팔자 탐색) | `pnl <= -PNL_THRESHOLD` |
 
 `format_message`: `{confirm_token}` = `raw_token` side flip (`715+`→`715-`).  
 예 템플릿: `{instrument} {confirm_token} ㅎㅈ`.

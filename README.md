@@ -26,7 +26,7 @@ Edit `.env` (`MODE=1|2|3`). Set `EXCEL_WORKBOOK` to the full absolute path of th
 ## Flow
 
 1. Excel START → `pythonw main.py --config .env`
-2. Load active slots from A/E; Looking For from E (±100) → G2 `OFFER` or `BID` only (all slots same direction)
+2. Load active slots from A/E; Looking For from E (`-100`→`BID`/사자, `+100`→`OFFER`/팔자) → G2 only (all slots same direction)
 3. Yield prefix: B6 → rows 19/25; B5 → rows 41/46/56
 4. Chat match any slot instrument + BUY/SELL → write D → wait `CalculationState==xlDone` → read F(row+3)
 5. Threshold hit → send flipped `{confirm_token} ㅎㅈ` → exit (one-shot)
@@ -47,7 +47,7 @@ pytest -q
 |------|------|
 | `source_reader.py` / `source_reader_kbond.py` / `source_reader_uia.py` / `eltree_reader.py` | MODE source factory + TElTree / UIA |
 | `excel_bridge.py` | 5 slots + B5/B6 prefix + F2–J2 status |
-| `trigger.py` | OFFER/BID threshold + side flip |
+| `trigger.py` | BID/OFFER threshold + side flip |
 | `send_ui.py` | clipboard send (target from MODE) |
 | `main.py` | orchestration |
 

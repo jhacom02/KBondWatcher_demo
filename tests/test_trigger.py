@@ -19,25 +19,25 @@ from trigger import (  # noqa: E402
 
 
 def test_looking_for_from_qty() -> None:
-    assert looking_for_from_qty(-100) == ("OFFER", "BUY")
-    assert looking_for_from_qty(100) == ("BID", "SELL")
+    assert looking_for_from_qty(-100) == ("BID", "BUY")
+    assert looking_for_from_qty(100) == ("OFFER", "SELL")
     with pytest.raises(ValueError):
         looking_for_from_qty(0)
 
 
-def test_evaluate_offer() -> None:
+def test_evaluate_bid() -> None:
     quote = Quote("25-11", "25-11 23+", "23+", 4.23, "BUY")
-    ok = evaluate(quote, 1_500_000, 1_000_000, "OFFER")
+    ok = evaluate(quote, 1_500_000, 1_000_000, "BID")
     assert ok.triggered is True
-    no = evaluate(quote, 500_000, 1_000_000, "OFFER")
+    no = evaluate(quote, 500_000, 1_000_000, "BID")
     assert no.triggered is False
 
 
-def test_evaluate_bid() -> None:
+def test_evaluate_offer() -> None:
     quote = Quote("25-11", "25-11 23-", "23-", 4.23, "SELL")
-    ok = evaluate(quote, -1_500_000, 1_000_000, "BID")
+    ok = evaluate(quote, -1_500_000, 1_000_000, "OFFER")
     assert ok.triggered is True
-    no = evaluate(quote, -500_000, 1_000_000, "BID")
+    no = evaluate(quote, -500_000, 1_000_000, "OFFER")
     assert no.triggered is False
 
 
