@@ -59,7 +59,7 @@ pythonw main.py --config .env
 | `quote_parser.py` | 채팅 라인 → `Quote` (엄격 정규식) |
 | `excel_bridge.py` | 실행 중 Excel COM: 입력/자동계산 후 P&L/상태셀 |
 | `trigger.py` | Looking For별 PnL 임계·side flip·메시지 템플릿 |
-| `send_ui.py` | 범용 UI 창 활성화·클릭·붙여넣기·Enter (대상은 MODE) |
+| `send_ui.py` | 범용 UI 클릭·붙여넣기·Enter (TOPMOST로 전송 대상 확보, 대상은 MODE) |
 | `logger.py` | `kbond_watcher` 로거 (파일 롤링 + 콘솔) |
 | `vba/KBondWatcher.bas` | Excel START/STOP 매크로 |
 | `tests/` | 파서·트리거·브릿지·센더·MODE 단위 테스트 |
@@ -95,8 +95,8 @@ python main.py --config .env --test-send
 1. `WatcherSession(status=STARTING)` 생성 (내부 상태; Excel에는 쓰지 않음).
 2. `STOP_FLAG_PATH` 파일이 있으면 삭제 (`clear_stop_flag`).
 3. `ExcelBridge.connect()` → `load_slots()` (B5/B6 prefix, 5 slots, 단일 Looking For) → `update_status(WATCHING, looking_for=OFFER|BID)`.
-4. `create_source_reader(cfg)` → watermark.
-5. 루프: 라인 × 슬롯 매칭 → `write_yield_read_pnl(D, F)` → evaluate → Quote Skipped 또는 SENT exit.
+4. `create_source_reader(cfg)` → `find_source_window` → `ensure_target_window` → watermark. 소스/전송 창 실패 시 즉시 ERROR exit (재시도 없음).
+5. 루프: 라인 읽기 실패(`SourceReaderError`)도 즉시 ERROR. 매칭 → `write_yield_read_pnl(D, F)` → evaluate → Quote Skipped 또는 SENT exit.
 
 ### 4.3 Excel 상태 행 (F2~J2)
 
@@ -252,7 +252,7 @@ MODE 3: FORESTBOND UIA Text 수집 (`source_reader_uia.py`, KBondWatcher 로직 
 
 ### 7.2 창 찾기
 
-1. 프로세스 미실행·제목 불일치·TElTree/UIA 미발견 시 `SourceReaderError`.
+1. 프로세스 미실행·제목 불일치·TElTree/UIA 미발견 시 `SourceReaderError` → 즉시 ERROR 종료 (폴링 재시도 없음).
 2. `create_source_reader(cfg)`가 MODE에 맞는 리더를 반환.
 
 ### 7.3 텍스트 수집
@@ -372,12 +372,10 @@ MODE 프리셋의 프로세스/제목 창에 붙여넣기 후 Enter한다 (MODE 
 
 ### `send_text(text, cfg)`
 
-1. `ensure_target_window`:
-   - 프로세스 실행 여부 확인
-   - 제목에 `cfg.send_window_title` 부분 포함 + 해당 PID인 창 중 rank(가시성·면적) 최고 HWND 선택
-2. `activate_window`: Restore/Show → Alt+SetForeground / AttachThreadInput으로 포그라운드
-3. MODE 프리셋 `send_input_x/y` 비율 클릭
-4. 클립보드에 `text` 복사 → `Ctrl+V` → Enter
+1. `ensure_target_window`: 프로세스·제목으로 HWND 선택
+2. `activate_window` 후 잠시 `HWND_TOPMOST`로 z-order 확보
+3. 입력 비율 클릭 → 포그라운드·클릭 지점이 타깃 앱인지 확인 (아니면 `SendError`, paste 안 함)
+4. 클립보드 복사 → Ctrl+V → Enter → TOPMOST 해제
 5. 로그 `MESSAGE_SENT`
 
 클릭 좌표는 창 `GetWindowRect` 기준 상대 비율이다. UI 해상도·창 크기가 바뀌면 `.env`의 X/Y·pause를 재조정한다.
@@ -488,9 +486,10 @@ UI/실기 Excel·KBond 전송은 자동화 테스트 범위 밖이며, CLI `--di
 ## 17. 설계상 고정된 동작 요약
 
 - **One-shot**: 전송 성공(`SENT`) 또는 STOP/ERROR로 종료.
+- **Fail-fast**: 소스/전송 창 미발견·읽기 실패·전송 실패는 재시도 없이 즉시 `ERROR`.
 - **설정 외부화**: 비즈니스·좌표·타이밍은 `.env`만. `REQUIRED_SIDE` 없음(E41 유도).
 - **상태셀**: F2 Status 4종, G2 Looking For(`BID`/`OFFER`), H2/I2/J2.
-- **소스**: KBondMessenger 우측 `TElTree` 원격 항목 텍스트.
+- **소스**: MODE별 TElTree 또는 FORESTBOND UIA.
 - **계산**: `write_yield` → `CalculationState==xlDone` 대기 → `read_pnl`.
-- **확정 메시지**: side flip (`confirm_token`) 후 `SEND_*` 전송.
+- **확정 메시지**: side flip (`confirm_token`) 후 MODE send 대상 전송.
 - **워크북**: 프로젝트 밖 절대경로 `EXCEL_WORKBOOK` 지원.

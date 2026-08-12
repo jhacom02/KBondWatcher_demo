@@ -156,6 +156,7 @@ def run_watcher(cfg: Config) -> int:
 
         reader = create_source_reader(cfg)
         reader.find_source_window()
+        send_ui.ensure_target_window(cfg)
         reader.initialize_watermark(cfg.process_existing_on_start)
         poll_sec = cfg.poll_interval_ms / 1000.0
 
@@ -171,14 +172,9 @@ def run_watcher(cfg: Config) -> int:
                 clear_stop_flag(cfg.stop_flag_path)
                 return 0
 
-            try:
-                lines = reader.get_new_message_lines(
-                    process_existing_on_start=cfg.process_existing_on_start
-                )
-            except SourceReaderError as exc:
-                log.warning("source read error: %s", exc)
-                time.sleep(poll_sec)
-                continue
+            lines = reader.get_new_message_lines(
+                process_existing_on_start=cfg.process_existing_on_start
+            )
 
             for line in lines:
                 quote, slot = _match_quote(line, slots)

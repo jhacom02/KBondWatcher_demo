@@ -166,6 +166,33 @@ def _click_ratio(hwnd: int, ratio_x: float, ratio_y: float, pause: float) -> Non
     time.sleep(pause)
 
 
+def _set_topmost(hwnd: int, enabled: bool) -> None:
+    win32gui.SetWindowPos(
+        hwnd,
+        win32con.HWND_TOPMOST if enabled else win32con.HWND_NOTOPMOST,
+        0,
+        0,
+        0,
+        0,
+        win32con.SWP_NOMOVE | win32con.SWP_NOSIZE | win32con.SWP_SHOWWINDOW,
+    )
+
+
+def _same_app(target: int, hwnd: int) -> bool:
+    if not hwnd or not target:
+        return False
+    if hwnd == target:
+        return True
+    try:
+        if win32gui.GetAncestor(hwnd, win32con.GA_ROOT) == target:
+            return True
+        _, pid_t = win32process.GetWindowThreadProcessId(target)
+        _, pid_h = win32process.GetWindowThreadProcessId(hwnd)
+        return int(pid_t) == int(pid_h)
+    except Exception:
+        return False
+
+
 def ensure_target_window(cfg: Config) -> int:
     if not _is_process_running(cfg.send_process_name):
         raise SendError(f"{cfg.send_process_name} is not running")
@@ -180,17 +207,30 @@ def ensure_target_window(cfg: Config) -> int:
 def send_text(text: str, cfg: Config) -> None:
     hwnd = ensure_target_window(cfg)
     activate_window(hwnd, cfg)
-    _click_ratio(
-        hwnd,
-        cfg.send_input_x,
-        cfg.send_input_y,
-        cfg.send_input_click_pause_seconds,
-    )
-    pyperclip.copy(text)
-    pyautogui.hotkey("ctrl", "v")
-    time.sleep(cfg.send_paste_pause_seconds)
-    pyautogui.press("enter")
-    time.sleep(cfg.send_send_pause_seconds)
+    _set_topmost(hwnd, True)
+    try:
+        _force_foreground(hwnd, cfg)
+        time.sleep(cfg.send_after_activate_pause_seconds)
+        _click_ratio(
+            hwnd,
+            cfg.send_input_x,
+            cfg.send_input_y,
+            cfg.send_input_click_pause_seconds,
+        )
+        fg = win32gui.GetForegroundWindow()
+        under = win32gui.WindowFromPoint(win32api.GetCursorPos())
+        if not _same_app(hwnd, fg) or not _same_app(hwnd, under):
+            raise SendError(
+                f"send focus not on target fg={win32gui.GetWindowText(fg)!r} "
+                f"under={win32gui.GetWindowText(under)!r}"
+            )
+        pyperclip.copy(text)
+        pyautogui.hotkey("ctrl", "v")
+        time.sleep(cfg.send_paste_pause_seconds)
+        pyautogui.press("enter")
+        time.sleep(cfg.send_send_pause_seconds)
+    finally:
+        _set_topmost(hwnd, False)
     logger.info("MESSAGE_SENT | title=%s", cfg.send_window_title)
 
 
