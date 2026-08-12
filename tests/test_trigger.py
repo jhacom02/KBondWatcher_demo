@@ -10,18 +10,45 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from models import Quote  # noqa: E402
-from trigger import evaluate, format_message  # noqa: E402
+from trigger import (  # noqa: E402
+    evaluate,
+    flip_side_token,
+    format_message,
+    looking_for_from_qty,
+)
 
 
-def test_evaluate_trigger() -> None:
+def test_looking_for_from_qty() -> None:
+    assert looking_for_from_qty(-100) == ("OFFER", "BUY")
+    assert looking_for_from_qty(100) == ("BID", "SELL")
+    with pytest.raises(ValueError):
+        looking_for_from_qty(0)
+
+
+def test_evaluate_offer() -> None:
     quote = Quote("25-11", "25-11 23+", "23+", 4.23, "BUY")
-    ok = evaluate(quote, 1_500_000, 1_000_000)
+    ok = evaluate(quote, 1_500_000, 1_000_000, "OFFER")
     assert ok.triggered is True
-    no = evaluate(quote, 500_000, 1_000_000)
+    no = evaluate(quote, 500_000, 1_000_000, "OFFER")
     assert no.triggered is False
 
 
-def test_format_message() -> None:
-    quote = Quote("25-10", "25-10 23+", "23+", 3.23, "BUY")
-    text = format_message("{instrument} {raw_token} ㅎㅈ", quote, 1500000)
-    assert text == "25-10 23+ ㅎㅈ"
+def test_evaluate_bid() -> None:
+    quote = Quote("25-11", "25-11 23-", "23-", 4.23, "SELL")
+    ok = evaluate(quote, -1_500_000, 1_000_000, "BID")
+    assert ok.triggered is True
+    no = evaluate(quote, -500_000, 1_000_000, "BID")
+    assert no.triggered is False
+
+
+def test_flip_side_token() -> None:
+    assert flip_side_token("715+") == "715-"
+    assert flip_side_token("715-") == "715+"
+    assert flip_side_token("23사자") == "23팔자"
+    assert flip_side_token("23팔자") == "23사자"
+
+
+def test_format_message_confirm_token() -> None:
+    quote = Quote("25-10", "25-10 715+", "715+", 3.715, "BUY")
+    text = format_message("{instrument} {confirm_token} ㅎㅈ", quote, 1500000)
+    assert text == "25-10 715- ㅎㅈ"

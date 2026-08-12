@@ -2,12 +2,13 @@ Attribute VB_Name = "KBondWatcher"
 Option Explicit
 
 Private Const PYTHONW_PATH As String = "pythonw.exe"
-Private Const PROJECT_DIR As String = "C:\mycode\KBondWatcher"
-Private Const MAIN_PATH As String = "C:\mycode\KBondWatcher\main.py"
-Private Const CONFIG_PATH As String = "C:\mycode\KBondWatcher\.env"
+Private Const PROJECT_DIR As String = "C:\mycode\KBondWatcher_kbond"
+Private Const MAIN_PATH As String = "C:\mycode\KBondWatcher_kbond\main.py"
+Private Const CONFIG_PATH As String = "C:\mycode\KBondWatcher_kbond\.env"
 Private Const STOP_FLAG_PATH As String = "C:\temp\kbond_watcher.stop"
 
-Private Const STATUS_CELL As String = "G2"
+Private Const STATUS_CELL As String = "F2"
+Private Const LOOKING_FOR_CELL As String = "G2"
 Private Const LAST_QUOTE_CELL As String = "H2"
 Private Const LAST_PNL_CELL As String = "I2"
 Private Const LAST_ACTION_CELL As String = "J2"
@@ -16,6 +17,7 @@ Public Sub StartKBondWatcher()
     On Error GoTo Fail
 
     Range(STATUS_CELL).Value = ""
+    Range(LOOKING_FOR_CELL).Value = ""
     Range(LAST_ACTION_CELL).Value = ""
     Range(LAST_QUOTE_CELL).Value = ""
     Range(LAST_PNL_CELL).Value = ""

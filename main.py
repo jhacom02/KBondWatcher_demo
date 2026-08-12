@@ -3,12 +3,13 @@ from __future__ import annotations
 import argparse
 import sys
 import time
+from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
 from config import Config, ConfigError
-from excel_bridge import ExcelBridge, ExcelBridgeError
-from source_reader import SourceReader, SourceReaderError
+from excel_bridge import ExcelBridge, ExcelBridgeError, InstrumentSlot
+from source_reader import SourceReaderError, create_source_reader
 from logger import get_logger, setup_logger
 import send_ui
 from send_ui import SendError
@@ -29,6 +30,11 @@ def stop_requested(path: Path) -> bool:
     return path.is_file()
 
 
+def format_last_action(action: str) -> str:
+    stamp = datetime.now().strftime("%H:%M:%S")
+    return f"({stamp}) {action}"
+
+
 def build_arg_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser()
     parser.add_argument("--config", default=".env")
@@ -39,11 +45,25 @@ def build_arg_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def run_diagnose_source(cfg: Config) -> int:
-    reader = SourceReader(
-        source_window_title=cfg.source_window_title,
-        source_process_name=cfg.source_process_name,
+def _build_excel(cfg: Config) -> ExcelBridge:
+    return ExcelBridge(
+        workbook_name=cfg.excel_workbook,
+        sheet_name=cfg.excel_sheet,
+        status_cell=cfg.excel_status_cell,
+        looking_for_cell=cfg.excel_looking_for_cell,
+        last_quote_cell=cfg.excel_last_quote_cell,
+        last_pnl_cell=cfg.excel_last_pnl_cell,
+        last_action_cell=cfg.excel_last_action_cell,
+        slot_rows=cfg.excel_slot_rows,
+        rows_10y=cfg.excel_rows_10y,
+        rows_3y=cfg.excel_rows_3y,
+        prefix_3y_cell=cfg.excel_prefix_3y_cell,
+        prefix_10y_cell=cfg.excel_prefix_10y_cell,
     )
+
+
+def run_diagnose_source(cfg: Config) -> int:
+    reader = create_source_reader(cfg)
     print(reader.diagnose(max_messages=200))
     return 0
 
@@ -55,10 +75,10 @@ def run_diagnose_send(cfg: Config) -> int:
 
 def run_test_send(cfg: Config) -> int:
     sample = Quote(
-        instrument=cfg.target,
-        raw_line=f"{cfg.target} test",
+        instrument="25-10",
+        raw_line="25-10 test",
         raw_token="00+",
-        yield_value=float(cfg.yield_prefix),
+        yield_value=3.0,
         side="BUY",
     )
     text = format_message(cfg.message_template, sample, pnl=0.0)
@@ -68,17 +88,43 @@ def run_test_send(cfg: Config) -> int:
 
 
 def run_test_parser(cfg: Config, line: str) -> int:
-    quote = parse_quote_line(
-        line=line,
-        target=cfg.target,
-        yield_prefix=cfg.yield_prefix,
-        required_side=cfg.required_side,
-    )
-    if quote is None:
-        print(f"No match for TARGET={cfg.target!r} in line: {line!r}")
-        return 1
-    print(format_parser_result(quote))
-    return 0
+    excel = _build_excel(cfg)
+    try:
+        excel.connect()
+        slots, looking_for = excel.load_slots()
+    finally:
+        excel.close()
+    for slot in slots:
+        quote = parse_quote_line(
+            line=line,
+            target=slot.instrument,
+            yield_prefix=slot.yield_prefix,
+            required_side=slot.required_side,
+        )
+        if quote is None:
+            continue
+        print(f"looking_for={looking_for} slot_row={slot.row}")
+        print(format_parser_result(quote))
+        return 0
+    instruments = ", ".join(s.instrument for s in slots)
+    print(f"No match for active slots [{instruments}] in line: {line!r}")
+    return 1
+
+
+def _match_quote(
+    line: str,
+    slots: list[InstrumentSlot],
+) -> tuple[Optional[Quote], Optional[InstrumentSlot]]:
+    for slot in slots:
+        quote = parse_quote_line(
+            line=line,
+            target=slot.instrument,
+            yield_prefix=slot.yield_prefix,
+            required_side=slot.required_side,
+        )
+        if quote is not None:
+            return quote, slot
+    return None, None
 
 
 def run_watcher(cfg: Config) -> int:
@@ -88,25 +134,27 @@ def run_watcher(cfg: Config) -> int:
     clear_stop_flag(cfg.stop_flag_path)
 
     try:
-        excel = ExcelBridge(
-            workbook_name=cfg.excel_workbook,
-            sheet_name=cfg.excel_sheet,
-            input_cell=cfg.excel_input_cell,
-            pnl_cell=cfg.excel_pnl_cell,
-            status_cell=cfg.excel_status_cell,
-            last_quote_cell=cfg.excel_last_quote_cell,
-            last_pnl_cell=cfg.excel_last_pnl_cell,
-            last_action_cell=cfg.excel_last_action_cell,
-        )
+        excel = _build_excel(cfg)
         excel.connect()
-        excel.update_status(AppStatus.WATCHING, last_action="Start Successful")
-        session.status = AppStatus.WATCHING
-        log.info("WATCHING")
-
-        reader = SourceReader(
-            source_window_title=cfg.source_window_title,
-            source_process_name=cfg.source_process_name,
+        slots, looking_for = excel.load_slots()
+        excel.update_status(
+            AppStatus.WATCHING,
+            looking_for=looking_for,
+            last_action=format_last_action("Start Successful"),
         )
+        session.status = AppStatus.WATCHING
+        log.info(
+            "WATCHING | mode=%s source=%s/%s send=%s/%s looking_for=%s slots=%s",
+            cfg.mode,
+            cfg.source_process_name or "(uia)",
+            cfg.source_window_title,
+            cfg.send_process_name,
+            cfg.send_window_title,
+            looking_for,
+            [(s.instrument, s.row, s.required_side) for s in slots],
+        )
+
+        reader = create_source_reader(cfg)
         reader.find_source_window()
         reader.initialize_watermark(cfg.process_existing_on_start)
         poll_sec = cfg.poll_interval_ms / 1000.0
@@ -115,7 +163,11 @@ def run_watcher(cfg: Config) -> int:
             if stop_requested(cfg.stop_flag_path):
                 session.status = AppStatus.STOPPED
                 log.info("STOPPED")
-                excel.update_status(AppStatus.STOPPED, last_action="Stopped")
+                excel.update_status(
+                    AppStatus.STOPPED,
+                    looking_for=looking_for,
+                    last_action=format_last_action("Stopped"),
+                )
                 clear_stop_flag(cfg.stop_flag_path)
                 return 0
 
@@ -129,13 +181,8 @@ def run_watcher(cfg: Config) -> int:
                 continue
 
             for line in lines:
-                quote = parse_quote_line(
-                    line=line,
-                    target=cfg.target,
-                    yield_prefix=cfg.yield_prefix,
-                    required_side=cfg.required_side,
-                )
-                if quote is None:
+                quote, slot = _match_quote(line, slots)
+                if quote is None or slot is None:
                     continue
                 if quote.fingerprint in session.processed_fingerprints:
                     continue
@@ -143,17 +190,26 @@ def run_watcher(cfg: Config) -> int:
 
                 session.status = AppStatus.QUOTE_FOUND
                 log.info(
-                    "QUOTE_FOUND | %s | %s | %.3f | %s",
+                    "QUOTE_FOUND | %s | %s | %.3f | %s | row=%s",
                     quote.instrument,
                     quote.raw_token,
                     quote.yield_value,
                     quote.side,
+                    slot.row,
                 )
 
                 session.status = AppStatus.CALCULATING
-                pnl = excel.write_yield_read_pnl(quote.yield_value)
-                result = evaluate(quote, pnl, cfg.pnl_threshold)
-                pnl_text = f"{int(round(pnl)):,}"
+                pnl = excel.write_yield_read_pnl(
+                    slot.input_cell,
+                    slot.pnl_cell,
+                    quote.yield_value,
+                )
+                result = evaluate(
+                    quote,
+                    pnl,
+                    cfg.pnl_threshold,
+                    looking_for=slot.looking_for,
+                )
 
                 if not result.triggered:
                     session.status = AppStatus.NO_TRIGGER
@@ -161,12 +217,10 @@ def run_watcher(cfg: Config) -> int:
                     session.status = AppStatus.WATCHING
                     excel.update_status(
                         AppStatus.WATCHING,
+                        looking_for=looking_for,
                         last_quote=f"{quote.instrument} {quote.raw_token}",
                         last_pnl=pnl,
-                        last_action=(
-                            f"Quote Passed: {quote.instrument} {quote.raw_token} "
-                            f"(pnl={pnl_text})"
-                        ),
+                        last_action=format_last_action("Quote Skipped"),
                     )
                     log.info("WATCHING")
                     continue
@@ -181,9 +235,10 @@ def run_watcher(cfg: Config) -> int:
                 log.info("SENT")
                 excel.update_status(
                     AppStatus.SENT,
+                    looking_for=looking_for,
                     last_quote=f"{quote.instrument} {quote.raw_token}",
                     last_pnl=pnl,
-                    last_action=f"Message Sent: {text}",
+                    last_action=format_last_action(f"Message Sent: {text}"),
                 )
                 log.info("EXIT")
                 return 0
@@ -195,7 +250,7 @@ def run_watcher(cfg: Config) -> int:
         if excel is not None:
             excel.update_status(
                 AppStatus.ERROR,
-                last_action=f"Python Error: {str(exc)[:200]}",
+                last_action=format_last_action(f"Python Error: {str(exc)[:200]}"),
             )
         return 1
     except Exception as exc:
@@ -203,7 +258,7 @@ def run_watcher(cfg: Config) -> int:
         if excel is not None:
             excel.update_status(
                 AppStatus.ERROR,
-                last_action=f"Python Error: {str(exc)[:200]}",
+                last_action=format_last_action(f"Python Error: {str(exc)[:200]}"),
             )
         return 1
     finally:

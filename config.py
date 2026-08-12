@@ -11,6 +11,17 @@ class ConfigError(ValueError):
     pass
 
 
+KBOND_PROCESS = "KBondMessenger.exe"
+KBOND_TITLE = "K-Bond"
+FORESTBOND_TITLE = "FORESTBOND"
+NOTEPAD_PROCESS = "notepad.exe"
+NOTEPAD_TITLE = "메모장"
+KBOND_SEND_INPUT_X = 0.825
+KBOND_SEND_INPUT_Y = 0.940
+NOTEPAD_SEND_INPUT_X = 0.5
+NOTEPAD_SEND_INPUT_Y = 0.5
+
+
 def _parse_bool(value: str, key: str) -> bool:
     normalized = value.strip().lower()
     if normalized in {"1", "true", "yes", "y", "on"}:
@@ -34,27 +45,64 @@ def _parse_int(value: str, key: str) -> int:
         raise ConfigError(f"{key} must be an integer, got {value!r}") from exc
 
 
-def _require_ratio(value: float, key: str) -> float:
-    if not (0.0 <= value <= 1.0):
-        raise ConfigError(f"{key} must be between 0 and 1 inclusive")
-    return value
+def _parse_int_list(value: str, key: str) -> list[int]:
+    parts = [p.strip() for p in value.replace(";", ",").split(",") if p.strip()]
+    if not parts:
+        raise ConfigError(f"{key} must not be empty")
+    out: list[int] = []
+    for part in parts:
+        out.append(_parse_int(part, key))
+    return out
+
+
+def mode_presets(mode: int) -> tuple[str, str, str, str, float, float]:
+    if mode == 1:
+        return (
+            KBOND_TITLE,
+            KBOND_PROCESS,
+            KBOND_PROCESS,
+            KBOND_TITLE,
+            KBOND_SEND_INPUT_X,
+            KBOND_SEND_INPUT_Y,
+        )
+    if mode == 2:
+        return (
+            KBOND_TITLE,
+            KBOND_PROCESS,
+            NOTEPAD_PROCESS,
+            NOTEPAD_TITLE,
+            NOTEPAD_SEND_INPUT_X,
+            NOTEPAD_SEND_INPUT_Y,
+        )
+    if mode == 3:
+        return (
+            FORESTBOND_TITLE,
+            "",
+            NOTEPAD_PROCESS,
+            NOTEPAD_TITLE,
+            NOTEPAD_SEND_INPUT_X,
+            NOTEPAD_SEND_INPUT_Y,
+        )
+    raise ConfigError(f"MODE must be 1, 2, or 3, got {mode}")
 
 
 @dataclass(frozen=True)
 class Config:
-    target: str
+    mode: int
     source_window_title: str
     source_process_name: str
-    yield_prefix: float
-    required_side: str
     poll_interval_ms: int
     process_existing_on_start: bool
 
     excel_workbook: str
     excel_sheet: str
-    excel_input_cell: str
-    excel_pnl_cell: str
+    excel_slot_rows: tuple[int, ...]
+    excel_rows_10y: tuple[int, ...]
+    excel_rows_3y: tuple[int, ...]
+    excel_prefix_3y_cell: str
+    excel_prefix_10y_cell: str
     excel_status_cell: str
+    excel_looking_for_cell: str
     excel_last_quote_cell: str
     excel_last_pnl_cell: str
     excel_last_action_cell: str
@@ -105,20 +153,15 @@ class Config:
                 return file_values[key]
             return os.getenv(key, "")
 
-        target = require("TARGET")
-        if not target:
-            raise ConfigError("TARGET must not be empty")
-
-        source_window_title = require("SOURCE_WINDOW_TITLE")
-        if not source_window_title:
-            raise ConfigError("SOURCE_WINDOW_TITLE must not be empty")
-        source_process_name = optional("SOURCE_PROCESS_NAME").strip()
-
-        yield_prefix = _parse_float(require("YIELD_PREFIX"), "YIELD_PREFIX")
-
-        required_side = require("REQUIRED_SIDE").upper()
-        if required_side not in {"ANY", "BUY", "SELL"}:
-            raise ConfigError("REQUIRED_SIDE must be ANY, BUY, or SELL")
+        mode = _parse_int(require("MODE"), "MODE")
+        (
+            source_window_title,
+            source_process_name,
+            send_process_name,
+            send_window_title,
+            send_input_x,
+            send_input_y,
+        ) = mode_presets(mode)
 
         poll_interval_ms = _parse_int(require("POLL_INTERVAL_MS"), "POLL_INTERVAL_MS")
         if poll_interval_ms < 100:
@@ -133,16 +176,33 @@ class Config:
         if not excel_workbook:
             raise ConfigError("EXCEL_WORKBOOK must not be empty")
         excel_sheet = optional("EXCEL_SHEET")
-        excel_input_cell = require("EXCEL_INPUT_CELL")
-        excel_pnl_cell = require("EXCEL_PNL_CELL")
+        excel_slot_rows = tuple(
+            _parse_int_list(require("EXCEL_SLOT_ROWS"), "EXCEL_SLOT_ROWS")
+        )
+        excel_rows_10y = tuple(
+            _parse_int_list(
+                optional("EXCEL_ROWS_10Y") or "19,25",
+                "EXCEL_ROWS_10Y",
+            )
+        )
+        excel_rows_3y = tuple(
+            _parse_int_list(
+                optional("EXCEL_ROWS_3Y") or "41,46,56",
+                "EXCEL_ROWS_3Y",
+            )
+        )
+        excel_prefix_3y_cell = require("EXCEL_PREFIX_3Y_CELL")
+        excel_prefix_10y_cell = require("EXCEL_PREFIX_10Y_CELL")
         excel_status_cell = require("EXCEL_STATUS_CELL")
+        excel_looking_for_cell = require("EXCEL_LOOKING_FOR_CELL")
         excel_last_quote_cell = require("EXCEL_LAST_QUOTE_CELL")
         excel_last_pnl_cell = require("EXCEL_LAST_PNL_CELL")
         excel_last_action_cell = require("EXCEL_LAST_ACTION_CELL")
         for cell_key, cell_val in [
-            ("EXCEL_INPUT_CELL", excel_input_cell),
-            ("EXCEL_PNL_CELL", excel_pnl_cell),
+            ("EXCEL_PREFIX_3Y_CELL", excel_prefix_3y_cell),
+            ("EXCEL_PREFIX_10Y_CELL", excel_prefix_10y_cell),
             ("EXCEL_STATUS_CELL", excel_status_cell),
+            ("EXCEL_LOOKING_FOR_CELL", excel_looking_for_cell),
             ("EXCEL_LAST_QUOTE_CELL", excel_last_quote_cell),
             ("EXCEL_LAST_PNL_CELL", excel_last_pnl_cell),
             ("EXCEL_LAST_ACTION_CELL", excel_last_action_cell),
@@ -150,26 +210,18 @@ class Config:
             if not cell_val:
                 raise ConfigError(f"{cell_key} must not be empty")
 
+        mapped = set(excel_rows_10y) | set(excel_rows_3y)
+        for row in excel_slot_rows:
+            if row not in mapped:
+                raise ConfigError(
+                    f"EXCEL_SLOT_ROWS contains {row} not in EXCEL_ROWS_10Y/3Y"
+                )
+
         pnl_threshold = _parse_float(require("PNL_THRESHOLD"), "PNL_THRESHOLD")
 
-        send_process_name = require("SEND_PROCESS_NAME")
-        if not send_process_name:
-            raise ConfigError("SEND_PROCESS_NAME must not be empty")
-        send_window_title = require("SEND_WINDOW_TITLE")
-        if not send_window_title:
-            raise ConfigError("SEND_WINDOW_TITLE must not be empty")
         message_template = require("MESSAGE_TEMPLATE")
         if not message_template:
             raise ConfigError("MESSAGE_TEMPLATE must not be empty")
-
-        send_input_x = _require_ratio(
-            _parse_float(require("SEND_INPUT_X"), "SEND_INPUT_X"),
-            "SEND_INPUT_X",
-        )
-        send_input_y = _require_ratio(
-            _parse_float(require("SEND_INPUT_Y"), "SEND_INPUT_Y"),
-            "SEND_INPUT_Y",
-        )
 
         send_foreground_retry_pause_seconds = _parse_float(
             require("SEND_FOREGROUND_RETRY_PAUSE_SECONDS"),
@@ -208,18 +260,20 @@ class Config:
             log_path = path.parent / log_path
 
         return cls(
-            target=target,
+            mode=mode,
             source_window_title=source_window_title,
             source_process_name=source_process_name,
-            yield_prefix=yield_prefix,
-            required_side=required_side,
             poll_interval_ms=poll_interval_ms,
             process_existing_on_start=process_existing_on_start,
             excel_workbook=excel_workbook,
             excel_sheet=excel_sheet,
-            excel_input_cell=excel_input_cell,
-            excel_pnl_cell=excel_pnl_cell,
+            excel_slot_rows=excel_slot_rows,
+            excel_rows_10y=excel_rows_10y,
+            excel_rows_3y=excel_rows_3y,
+            excel_prefix_3y_cell=excel_prefix_3y_cell,
+            excel_prefix_10y_cell=excel_prefix_10y_cell,
             excel_status_cell=excel_status_cell,
+            excel_looking_for_cell=excel_looking_for_cell,
             excel_last_quote_cell=excel_last_quote_cell,
             excel_last_pnl_cell=excel_last_pnl_cell,
             excel_last_action_cell=excel_last_action_cell,

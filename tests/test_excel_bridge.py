@@ -1,5 +1,3 @@
-"""Unit tests for Excel bridge pure helpers (no COM required)."""
-
 from __future__ import annotations
 
 import sys
@@ -14,7 +12,10 @@ if str(ROOT) not in sys.path:
 from excel_bridge import (  # noqa: E402
     ExcelBridgeError,
     format_status,
+    normalize_instrument,
+    prefix_from_prev_yield,
     to_float,
+    workbook_matches_open,
 )
 from models import AppStatus  # noqa: E402
 
@@ -40,3 +41,27 @@ def test_to_float_rejects_empty() -> None:
 def test_format_status() -> None:
     assert format_status(AppStatus.SENT) == "SENT"
     assert format_status("WATCHING") == "WATCHING"
+
+
+def test_workbook_matches_absolute_full_name() -> None:
+    cfg = r"C:\Users\Daily\daily.xlsm"
+    assert workbook_matches_open(cfg, "daily.xlsm", r"C:\Users\Daily\daily.xlsm")
+    assert workbook_matches_open(cfg, "other.xlsm", r"C:\Users\Daily\other.xlsm") is False
+
+
+def test_workbook_matches_by_file_name() -> None:
+    cfg = r"C:\Users\Daily\daily.xlsm"
+    assert workbook_matches_open(cfg, "daily.xlsm", r"D:\elsewhere\daily.xlsm")
+
+
+def test_normalize_instrument() -> None:
+    assert normalize_instrument("국고 25-5") == "25-5"
+    assert normalize_instrument("국고25-10") == "25-10"
+    assert normalize_instrument("  국고  25-11 ") == "25-11"
+    assert normalize_instrument("") == ""
+
+
+def test_prefix_from_prev_yield() -> None:
+    assert prefix_from_prev_yield(3.215) == 3.0
+    assert prefix_from_prev_yield(4.180) == 4.0
+    assert prefix_from_prev_yield(-3.99) == 3.0
