@@ -16,10 +16,6 @@ KBOND_TITLE = "K-Bond"
 FORESTBOND_TITLE = "FORESTBOND"
 NOTEPAD_PROCESS = "notepad.exe"
 NOTEPAD_TITLE = "메모장"
-KBOND_SEND_INPUT_X = 0.825
-KBOND_SEND_INPUT_Y = 0.940
-NOTEPAD_SEND_INPUT_X = 0.5
-NOTEPAD_SEND_INPUT_Y = 0.5
 
 
 def _parse_bool(value: str, key: str) -> bool:
@@ -62,15 +58,20 @@ def _parse_int_list(value: str, key: str) -> list[int]:
     return out
 
 
-def mode_presets(mode: int) -> tuple[str, str, str, str, float, float]:
+def _parse_ratio(value: str, key: str) -> float:
+    ratio = _parse_float(value, key)
+    if not 0.0 <= ratio <= 1.0:
+        raise ConfigError(f"{key} must be between 0 and 1, got {value!r}")
+    return ratio
+
+
+def mode_presets(mode: int) -> tuple[str, str, str, str]:
     if mode == 1:
         return (
             KBOND_TITLE,
             KBOND_PROCESS,
             KBOND_PROCESS,
             KBOND_TITLE,
-            KBOND_SEND_INPUT_X,
-            KBOND_SEND_INPUT_Y,
         )
     if mode == 2:
         return (
@@ -78,8 +79,6 @@ def mode_presets(mode: int) -> tuple[str, str, str, str, float, float]:
             KBOND_PROCESS,
             NOTEPAD_PROCESS,
             NOTEPAD_TITLE,
-            NOTEPAD_SEND_INPUT_X,
-            NOTEPAD_SEND_INPUT_Y,
         )
     if mode == 3:
         return (
@@ -87,8 +86,6 @@ def mode_presets(mode: int) -> tuple[str, str, str, str, float, float]:
             "",
             NOTEPAD_PROCESS,
             NOTEPAD_TITLE,
-            NOTEPAD_SEND_INPUT_X,
-            NOTEPAD_SEND_INPUT_Y,
         )
     raise ConfigError(f"MODE must be 1, 2, or 3, got {mode}")
 
@@ -171,9 +168,14 @@ class Config:
             source_process_name,
             send_process_name,
             send_window_title,
-            send_input_x,
-            send_input_y,
         ) = mode_presets(mode)
+
+        if mode == 1:
+            send_input_x = _parse_ratio(require("SEND_INPUT_X_M1"), "SEND_INPUT_X_M1")
+            send_input_y = _parse_ratio(require("SEND_INPUT_Y_M1"), "SEND_INPUT_Y_M1")
+        else:
+            send_input_x = _parse_ratio(require("SEND_INPUT_X_M23"), "SEND_INPUT_X_M23")
+            send_input_y = _parse_ratio(require("SEND_INPUT_Y_M23"), "SEND_INPUT_Y_M23")
 
         poll_interval_ms = _parse_int(require("POLL_INTERVAL_MS"), "POLL_INTERVAL_MS")
         if poll_interval_ms < 100:

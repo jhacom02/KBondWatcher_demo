@@ -15,7 +15,7 @@ _SENDER_TS = re.compile(
     r"^\s*(?P<sender>.+?)\s*\((?P<ts>\d{1,2}:\d{2}(?::\d{2})?)\)\s*[:：]\s*(?P<body>.*)$"
 )
 _PRICE_SIDE = re.compile(
-    r"^\s+(?P<price>\d{2,3})\s*(?P<side>[+-]|사자|팔자)\s*$"
+    r"^\s+(?P<price>\d{2,3})\s*(?P<side>[+-]|사자|팔자)\s*"
 )
 
 
@@ -73,8 +73,12 @@ def parse_quote_line(
         return None
     sender, timestamp, _ = _extract_meta(line)
     after = line[target_match.end() :]
-    token_match = _PRICE_SIDE.fullmatch(after)
+    token_match = _PRICE_SIDE.match(after)
     if token_match is None:
+        return None
+    rest = after[token_match.end() :]
+    rest_stripped = rest.strip()
+    if rest_stripped and not rest_stripped.startswith(("(", "*")):
         return None
     price = token_match.group("price")
     side_marker = token_match.group("side")
@@ -86,7 +90,7 @@ def parse_quote_line(
     return Quote(
         instrument=target,
         raw_line=line.strip(),
-        raw_token=after.strip(),
+        raw_token=token_match.group(0).strip(),
         yield_value=yield_value,
         side=side,
         timestamp=timestamp,

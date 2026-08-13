@@ -13,19 +13,28 @@ from source.quote_parser import parse_quote_line
 
 
 @pytest.mark.parametrize(
-    "line,target,prefix,expected_yield,expected_side",
+    "line,target,prefix,expected_yield,expected_side,expected_token",
     [
-        ("25-10 735+", "25-10", 3, 3.735, "BUY"),
-        ("25-10 735 +", "25-10", 3, 3.735, "BUY"),
-        ("25-10 735사자", "25-10", 3, 3.735, "BUY"),
-        ("25-10 735 사자", "25-10", 3, 3.735, "BUY"),
-        ("25-11 23+", "25-11", 4, 4.23, "BUY"),
-        ("25-11 23-", "25-11", 4, 4.23, "SELL"),
-        ("25-11 235+", "25-11", 4, 4.235, "BUY"),
-        ("25-11 235-", "25-11", 4, 4.235, "SELL"),
-        ("25-11 23 사자", "25-11", 4, 4.23, "BUY"),
-        ("25-11 23 팔자", "25-11", 4, 4.23, "SELL"),
-        ("홍길동 (16:20:30) : 25-11 23+", "25-11", 4, 4.23, "BUY"),
+        ("25-10 735+", "25-10", 3, 3.735, "BUY", "735+"),
+        ("25-10 735 +", "25-10", 3, 3.735, "BUY", "735 +"),
+        ("25-10 735사자", "25-10", 3, 3.735, "BUY", "735사자"),
+        ("25-10 735 사자", "25-10", 3, 3.735, "BUY", "735 사자"),
+        ("25-11 23+", "25-11", 4, 4.23, "BUY", "23+"),
+        ("25-11 23-", "25-11", 4, 4.23, "SELL", "23-"),
+        ("25-11 235+", "25-11", 4, 4.235, "BUY", "235+"),
+        ("25-11 235-", "25-11", 4, 4.235, "SELL", "235-"),
+        ("25-11 23 사자", "25-11", 4, 4.23, "BUY", "23 사자"),
+        ("25-11 23 팔자", "25-11", 4, 4.23, "SELL", "23 팔자"),
+        ("홍길동 (16:20:30) : 25-11 23+", "25-11", 4, 4.23, "BUY", "23+"),
+        (
+            "신영환 (11:06:38) : 22-14  14- (**증권 채권금융 368-****)",
+            "22-14",
+            3,
+            3.14,
+            "SELL",
+            "14-",
+        ),
+        ("25-10 735+ *증권", "25-10", 3, 3.735, "BUY", "735+"),
     ],
 )
 def test_accept(
@@ -34,12 +43,15 @@ def test_accept(
     prefix: float,
     expected_yield: float,
     expected_side: str,
+    expected_token: str,
 ) -> None:
     quote = parse_quote_line(line, target=target, yield_prefix=prefix)
     assert quote is not None
     assert quote.instrument == target
     assert quote.yield_value == pytest.approx(expected_yield)
     assert quote.side == expected_side
+    assert quote.raw_token == expected_token
+    assert quote.raw_line == line.strip()
 
 
 @pytest.mark.parametrize(

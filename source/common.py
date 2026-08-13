@@ -46,9 +46,21 @@ class BaseSourceReader(ABC):
             process_existing_on_start,
         )
 
+    def reseed_watermark_from_visible(self) -> None:
+        """Mark all currently visible lines as seen (union). Keep prior fingerprints."""
+        current = self.get_visible_message_lines()
+        for line in current:
+            self._watermark.add(message_fingerprint(line))
+        self._initialized = True
+        logger.info(
+            "source watermark reseed | visible=%s | total=%s",
+            len(current),
+            len(self._watermark),
+        )
+
     def get_new_message_lines(
         self,
-        process_existing_on_start: bool = True,
+        process_existing_on_start: bool = False,
     ) -> list[str]:
         lines = self.get_visible_message_lines()
         if not self._initialized:

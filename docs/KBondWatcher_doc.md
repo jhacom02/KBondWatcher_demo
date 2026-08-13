@@ -121,15 +121,16 @@ Quote Skipped는 호가/PnL 없이 `(HH:MM:SS) Quote Skipped`만 쓴다. 호가�
 - 파일이 없으면 `ConfigError`.
 - `python-dotenv`로 로드한 뒤, 파일을 다시 읽어 key=value를 파싱한다 (주석·빈 줄 무시, 따옴표 trim).
 - 값은 파일 우선, 없으면 환경변수. 필수 키 누락·형식 오류 시 `ConfigError`.
-- `MODE`가 source/send 창 identity·click ratio를 고정한다. `.env`에 `SOURCE_*` / `SEND_PROCESS_NAME` / `SEND_WINDOW_TITLE` / `SEND_INPUT_*`가 있어도 무시된다.
+- `MODE`가 source/send 창 identity(프로세스·제목)를 고정한다. `.env`의 `SOURCE_*` / `SEND_PROCESS_NAME` / `SEND_WINDOW_TITLE`는 무시된다.
+- 전송 클릭 비율은 `.env`의 `SEND_INPUT_X_M1`/`Y_M1`(MODE 1), `SEND_INPUT_X_M23`/`Y_M23`(MODE 2·3)로 설정한다 (0~1).
 
 ### 5.0 MODE
 
-| MODE | Source | Send |
-|------|--------|------|
-| 1 | KBondMessenger (`K-Bond` / TElTree) | KBondMessenger (click 0.825, 0.940) |
-| 2 | KBondMessenger (TElTree) | Notepad (`메모장`, click 0.5, 0.5) |
-| 3 | FORESTBOND (UIA) | Notepad |
+| MODE | Source | Send | 클릭 비율 키 |
+|------|--------|------|--------------|
+| 1 | KBondMessenger (`K-Bond` / TElTree) | KBondMessenger | `SEND_INPUT_*_M1` (예: 0.825, 0.940) |
+| 2 | KBondMessenger (TElTree) | Notepad (`메모장`) | `SEND_INPUT_*_M23` (예: 0.5, 0.5) |
+| 3 | FORESTBOND (UIA) | Notepad | `SEND_INPUT_*_M23` |
 
 ### 5.1 감시
 
@@ -137,7 +138,7 @@ Quote Skipped는 호가/PnL 없이 `(HH:MM:SS) Quote Skipped`만 쓴다. 호가�
 |----|------|
 | `MODE` | `1` / `2` / `3` (필수) |
 | `POLL_INTERVAL_MS` | 폴링 간격 (≥ 100) |
-| `PROCESS_EXISTING_ON_START` | 시작 시 기존 라인 처리 여부 |
+| `PROCESS_EXISTING_ON_START` | 시작 시 기존 라인 처리 여부. **운영 기본 `false`**(시작 시점 화면은 watermark만, 이후 신규만). 파서·화면 재현 테스트할 때만 `true` |
 
 `TARGET` / `YIELD_PREFIX` / `SOURCE_*` 없음. 종목·prefix는 Excel 슬롯·B5/B6. 소스 창은 MODE 프리셋.
 
@@ -166,11 +167,13 @@ Quote Skipped는 호가/PnL 없이 `(HH:MM:SS) Quote Skipped`만 쓴다. 호가�
 슬롯: `{INSTRUMENT_COL}{R}` 종목(`국고` 제거), `{QTY_COL}{R}` ±100, `{INPUT_COL}{R}` 수익률, `{PNL_COL}{R+OFFSET}` PnL.  
 | `PNL_THRESHOLD` | 트리거 기준 |
 
-### 5.3 전송 (대상은 MODE, 타이밍만 `.env`)
+### 5.3 전송 (창 identity는 MODE, 클릭 비율·타이밍은 `.env`)
 
 | 키 | 설명 |
 |----|------|
 | `MESSAGE_TEMPLATE` | `str.format` 템플릿 |
+| `SEND_INPUT_X_M1` / `SEND_INPUT_Y_M1` | MODE 1 입력란 클릭 비율 (0~1) |
+| `SEND_INPUT_X_M23` / `SEND_INPUT_Y_M23` | MODE 2·3 입력란 클릭 비율 (0~1) |
 | `SEND_FOREGROUND_RETRY_PAUSE_SECONDS` | 포그라운드 재시도 대기 |
 | `SEND_ACTIVATE_SHOW_PAUSE_SECONDS` | Show/Restore 후 대기 |
 | `SEND_AFTER_ACTIVATE_PAUSE_SECONDS` | 활성화 후 대기 |
@@ -178,7 +181,7 @@ Quote Skipped는 호가/PnL 없이 `(HH:MM:SS) Quote Skipped`만 쓴다. 호가�
 | `SEND_PASTE_PAUSE_SECONDS` | 붙여넣기 후 대기 |
 | `SEND_SEND_PAUSE_SECONDS` | Enter 후 대기 |
 
-프로세스/제목/클릭 비율은 MODE 프리셋. `send` 패키지는 동일 경로를 사용한다.
+프로세스/제목은 MODE 프리셋. 클릭 비율은 `.env` `SEND_INPUT_*_M1` / `SEND_INPUT_*_M23`. `send` 패키지는 동일 경로를 사용한다.
 
 ### 5.4 기타
 
@@ -264,9 +267,10 @@ MODE 3: FORESTBOND UIA Text 수집 (`source/reader_uia.py`).
 
 - 라인 fingerprint = SHA1(UTF-8 텍스트).
 - `initialize_watermark(process_existing_on_start)`:
-  - `True`: watermark를 비움 → 현재 화면에 있는 것도 “신규”로 처리 가능.
-  - `False`: 현재 라인을 watermark에 넣어 **이후 새 것만** 반환.
-- `get_new_message_lines`: 미초기화면 watermark 규칙 적용 후, 이후에는 새 fingerprint만 반환.
+  - `True`: watermark를 비움 → 현재 화면에 있는 것도 “신규”로 처리 가능 (테스트용).
+  - `False` (운영 기본): 현재 라인을 watermark에 넣어 **이후 새 것만** 반환. 중지 중 쌓인 줄은 재기동 시 패스된다.
+- `get_new_message_lines`: 미초기화면 watermark 규칙 적용 후, 이후에는 새 fingerprint만 반환. 파라미터 기본값도 `False`.
+- `reseed_watermark_from_visible`: test-loop에서 SENT 후 현재 가시 라인을 watermark에 **합침(union)**. 시작 시 `PROCESS_EXISTING_ON_START=false`와 같이 **이후 신규만** 본다 (기존 fingerprint는 유지).
 
 세션 쪽(`WatcherSession.processed_fingerprints`)은 파싱 성공 호가용이며 ElTree watermark와 역할이 다르다.
 
@@ -305,14 +309,15 @@ MODE 3: FORESTBOND UIA Text 수집 (`source/reader_uia.py`).
 
 `보낸이 (HH:MM[:SS]) : body` 형태면 sender/timestamp를 뽑고, 파싱은 원문 전체에서 TARGET을 찾는다.
 
-### TARGET 이후 토큰 (필수, fullmatch)
+### TARGET 이후 토큰 (필수, match + 제한 trailing)
 
 ```text
-^\s+(?P<price>\d{2,3})\s*(?P<side>[+-]|사자|팔자)\s*$
+^\s+(?P<price>\d{2,3})\s*(?P<side>[+-]|사자|팔자)\s*
 ```
 
-수락 예: `735+`, `735 +`, `735사자`, `735 사자`, `23-`.  
-거부 예: 뒤에 `40억`, `ㅎㅈ`, `자투리` 등 추가 텍스트, 비호가 문장.
+`raw_token`은 매칭된 호가 구간만. 뒤 trailing은 비어 있거나 strip 후 `(` / `*`로 시작할 때만 허용 (예: `(**증권...)`).  
+수락 예: `735+`, `735 +`, `735사자`, `23-`, `14- (**증권...)`.  
+거부 예: 뒤에 `40억`, `ㅎㅈ`, `동`, `선`, `자투리` 등.
 
 ### 수익률 변환 (`digits_to_yield`)
 
@@ -432,7 +437,8 @@ pythonw.exe "<MAIN_PATH>" --config "<CONFIG_PATH>"
 - `setup_logger`: 부모 디렉터리 생성, RotatingFileHandler(2MB×5) + StreamHandler
 - 포맷: `%(asctime)s %(levelname)s %(message)s`
 
-감시 중 주요 로그 키워드: `WATCHING`, `QUOTE_FOUND`, `NO_TRIGGER`, `TRIGGERED`, `SENT`, `STOPPED`, `ERROR`, `EXIT`, `EXCEL_*`, `MESSAGE_SENT`.
+감시 중 주요 로그 키워드: `WATCHING`, `QUOTE_FOUND`, `NO_TRIGGER`, `TRIGGERED`, `SENT`, `STOPPED`, `ERROR`, `EXIT`, `EXCEL_*`, `MESSAGE_SENT`.  
+`QUOTE_FOUND`는 `raw_token`을 유지하고 `raw_line`(소스에서 읽은 문자열)을 함께 기록한다. H2는 `{instrument} {raw_token}`만 쓴다.
 
 ---
 

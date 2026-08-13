@@ -7,12 +7,8 @@ import pytest
 from config import (
     FORESTBOND_TITLE,
     KBOND_PROCESS,
-    KBOND_SEND_INPUT_X,
-    KBOND_SEND_INPUT_Y,
     KBOND_TITLE,
     NOTEPAD_PROCESS,
-    NOTEPAD_SEND_INPUT_X,
-    NOTEPAD_SEND_INPUT_Y,
     NOTEPAD_TITLE,
     Config,
     ConfigError,
@@ -46,6 +42,10 @@ def _write_env(path: Path, mode: str, extra: str = "") -> Path:
                 "EXCEL_LAST_PNL_CELL=I2",
                 "EXCEL_LAST_ACTION_CELL=J2",
                 "MESSAGE_TEMPLATE={instrument} {confirm_token} ㅎㅈ",
+                "SEND_INPUT_X_M1=0.825",
+                "SEND_INPUT_Y_M1=0.940",
+                "SEND_INPUT_X_M23=0.5",
+                "SEND_INPUT_Y_M23=0.5",
                 "SEND_FOREGROUND_RETRY_PAUSE_SECONDS=0.1",
                 "SEND_ACTIVATE_SHOW_PAUSE_SECONDS=0.15",
                 "SEND_AFTER_ACTIVATE_PAUSE_SECONDS=0.2",
@@ -71,8 +71,8 @@ def test_mode1_presets(tmp_path: Path) -> None:
     assert cfg.source_process_name == KBOND_PROCESS
     assert cfg.send_process_name == KBOND_PROCESS
     assert cfg.send_window_title == KBOND_TITLE
-    assert cfg.send_input_x == KBOND_SEND_INPUT_X
-    assert cfg.send_input_y == KBOND_SEND_INPUT_Y
+    assert cfg.send_input_x == pytest.approx(0.825)
+    assert cfg.send_input_y == pytest.approx(0.940)
     assert isinstance(create_source_reader(cfg), KbondSourceReader)
 
 
@@ -83,8 +83,8 @@ def test_mode2_presets(tmp_path: Path) -> None:
     assert cfg.source_process_name == KBOND_PROCESS
     assert cfg.send_process_name == NOTEPAD_PROCESS
     assert cfg.send_window_title == NOTEPAD_TITLE
-    assert cfg.send_input_x == NOTEPAD_SEND_INPUT_X
-    assert cfg.send_input_y == NOTEPAD_SEND_INPUT_Y
+    assert cfg.send_input_x == pytest.approx(0.5)
+    assert cfg.send_input_y == pytest.approx(0.5)
     assert isinstance(create_source_reader(cfg), KbondSourceReader)
 
 
@@ -95,8 +95,8 @@ def test_mode3_presets(tmp_path: Path) -> None:
     assert cfg.source_process_name == ""
     assert cfg.send_process_name == NOTEPAD_PROCESS
     assert cfg.send_window_title == NOTEPAD_TITLE
-    assert cfg.send_input_x == NOTEPAD_SEND_INPUT_X
-    assert cfg.send_input_y == NOTEPAD_SEND_INPUT_Y
+    assert cfg.send_input_x == pytest.approx(0.5)
+    assert cfg.send_input_y == pytest.approx(0.5)
     assert isinstance(create_source_reader(cfg), UiaSourceReader)
 
 
@@ -117,7 +117,31 @@ def test_mode_ignores_conflicting_identity_keys(tmp_path: Path) -> None:
     )
     assert cfg.source_window_title == KBOND_TITLE
     assert cfg.send_process_name == NOTEPAD_PROCESS
-    assert cfg.send_input_x == NOTEPAD_SEND_INPUT_X
+    assert cfg.send_input_x == pytest.approx(0.5)
+
+
+def test_mode1_uses_m1_ratios_from_env(tmp_path: Path) -> None:
+    cfg = Config.load(
+        _write_env(
+            tmp_path / "m1_ratio.env",
+            "1",
+            extra="SEND_INPUT_X_M1=0.71\nSEND_INPUT_Y_M1=0.92\n",
+        )
+    )
+    assert cfg.send_input_x == pytest.approx(0.71)
+    assert cfg.send_input_y == pytest.approx(0.92)
+
+
+def test_mode23_uses_m23_ratios_from_env(tmp_path: Path) -> None:
+    cfg = Config.load(
+        _write_env(
+            tmp_path / "m3_ratio.env",
+            "3",
+            extra="SEND_INPUT_X_M23=0.4\nSEND_INPUT_Y_M23=0.6\n",
+        )
+    )
+    assert cfg.send_input_x == pytest.approx(0.4)
+    assert cfg.send_input_y == pytest.approx(0.6)
 
 
 @pytest.mark.parametrize("bad", ["0", "4", "-1", "abc"])

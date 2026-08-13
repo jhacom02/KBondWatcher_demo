@@ -196,12 +196,13 @@ def run_watcher(cfg: Config) -> int:
 
                 session.status = AppStatus.QUOTE_FOUND
                 log.info(
-                    "QUOTE_FOUND | %s | %s | %.3f | %s | row=%s",
+                    "QUOTE_FOUND | %s | raw_token=%s | %.3f | %s | row=%s | raw_line=%s",
                     quote.instrument,
                     quote.raw_token,
                     quote.yield_value,
                     quote.side,
                     slot.row,
+                    quote.raw_line,
                 )
 
                 session.status = AppStatus.CALCULATING
@@ -246,8 +247,15 @@ def run_watcher(cfg: Config) -> int:
                     last_pnl=pnl,
                     last_action=format_last_action(f"Message Sent: {text}"),
                 )
-                log.info("EXIT")
-                return 0
+                # <<<< 2 lines are for one-shot >>>>
+                # log.info("EXIT")
+                # return 0
+                # <<<< test-loop: reseed then keep watching >>>>
+                reader.reseed_watermark_from_visible()
+                session.status = AppStatus.WATCHING
+                excel.update_status(AppStatus.WATCHING, looking_for=looking_for)
+                log.info("WATCHING")
+                continue
 
             time.sleep(poll_sec)
 

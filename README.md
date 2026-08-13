@@ -10,7 +10,7 @@ One-shot watcher: source (MODE) → 5 Excel slots → PnL threshold → send (MO
 | 2 | KBondMessenger (TElTree) | Notepad |
 | 3 | FORESTBOND (UIA) | Notepad |
 
-Source/send window identity and click ratios are fixed by `MODE` (not by `.env` `SOURCE_*` / `SEND_*` keys).
+Source/send window identity is fixed by `MODE`. Click ratios come from `.env` (`SEND_INPUT_X_M1`/`Y_M1`, `SEND_INPUT_X_M23`/`Y_M23`).
 
 ## Install
 
@@ -22,6 +22,8 @@ pip install -r requirements.txt
 ```
 
 Edit `.env` (`MODE=1|2|3`). Set `EXCEL_WORKBOOK` to the full absolute path of the open workbook.
+
+Operational defaults: `PROCESS_EXISTING_ON_START=false` (skip lines already on screen at start; only watch newer lines). Set `true` only when replaying visible chat for parser tests. After a threshold send the process exits (one-shot).
 
 ## Flow
 
