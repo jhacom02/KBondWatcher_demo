@@ -2,9 +2,9 @@ Attribute VB_Name = "KBondWatcher"
 Option Explicit
 
 Private Const PYTHONW_PATH As String = "pythonw.exe"
-Private Const PROJECT_DIR As String = "C:\mycode\KBondWatcher_kbond"
-Private Const MAIN_PATH As String = "C:\mycode\KBondWatcher_kbond\main.py"
-Private Const CONFIG_PATH As String = "C:\mycode\KBondWatcher_kbond\.env"
+Private Const PROJECT_DIR As String = "C:\mycode\KBondWatcher"
+Private Const MAIN_PATH As String = "C:\mycode\KBondWatcher\main.py"
+Private Const CONFIG_PATH As String = "C:\mycode\KBondWatcher\.env"
 Private Const STOP_FLAG_PATH As String = "C:\temp\kbond_watcher.stop"
 
 Private Const STATUS_CELL As String = "F2"

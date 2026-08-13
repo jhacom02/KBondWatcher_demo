@@ -15,7 +15,7 @@ Source/send window identity and click ratios are fixed by `MODE` (not by `.env` 
 ## Install
 
 ```bat
-cd C:\mycode\KBondWatcher_kbond
+cd C:\mycode\KBondWatcher
 python -m venv .venv
 .venv\Scripts\activate
 pip install -r requirements.txt
@@ -26,9 +26,9 @@ Edit `.env` (`MODE=1|2|3`). Set `EXCEL_WORKBOOK` to the full absolute path of th
 ## Flow
 
 1. Excel START → `pythonw main.py --config .env`
-2. Load active slots from A/E; Looking For from E (`-100`→`BID`/사자, `+100`→`OFFER`/팔자) → G2 only (all slots same direction)
-3. Yield prefix: B6 → rows 19/25; B5 → rows 41/46/56
-4. Chat match any slot instrument + BUY/SELL → write D → wait `CalculationState==xlDone` → read F(row+3)
+2. Load active slots from instrument/qty cols (default A/E); Looking For from qty (`-100`→`BID`/사자, `+100`→`OFFER`/팔자) → G2 only (all slots same direction)
+3. Yield prefix: B6 → rows 19/25; B5 → rows 41/46/56 (cells/rows from `.env`)
+4. Chat match → write input col → wait `CalculationState==xlDone` → read PnL col at row+offset
 5. Threshold hit → send flipped `{confirm_token} ㅎㅈ` → exit (one-shot)
 
 ## Diagnose
@@ -41,16 +41,18 @@ python main.py --config .env --test-send
 pytest -q
 ```
 
-## Modules
+## Layout
 
-| File | Role |
+| Path | Role |
 |------|------|
-| `source_reader.py` / `source_reader_kbond.py` / `source_reader_uia.py` / `eltree_reader.py` | MODE source factory + TElTree / UIA |
-| `excel_bridge.py` | 5 slots + B5/B6 prefix + F2–J2 status |
-| `trigger.py` | BID/OFFER threshold + side flip |
-| `send_ui.py` | clipboard send (target from MODE) |
-| `main.py` | orchestration |
+| `main.py` | CLI / orchestration |
+| `config/` | `.env` loader + MODE presets |
+| `source/` | MODE source factory, TElTree, UIA, quote parser |
+| `send/` | click / paste / Enter UI send |
+| `excel/` | 5 slots + B5/B6 prefix + F2–J2 status |
+| `core/` | models, trigger, logger |
+| `docs/` `logs/` `sample/` `tests/` `tools/` `vba/` | unchanged |
 
 ## VBA
 
-Import `vba/KBondWatcher.bas`. Status cells F2/G2/H2/I2/J2.
+Import `vba/KBondWatcher.bas`. Status cells F2/G2/H2/I2/J2. Paths point at `C:\mycode\KBondWatcher`.

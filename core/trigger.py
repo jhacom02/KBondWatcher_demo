@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from models import Quote, TriggerResult
+from .models import Quote, TriggerResult
 
 LOOKING_OFFER = "OFFER"
 LOOKING_BID = "BID"

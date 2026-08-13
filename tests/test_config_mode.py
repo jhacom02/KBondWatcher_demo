@@ -17,9 +17,7 @@ from config import (
     Config,
     ConfigError,
 )
-from source_reader import create_source_reader
-from source_reader_kbond import KbondSourceReader
-from source_reader_uia import UiaSourceReader
+from source import KbondSourceReader, UiaSourceReader, create_source_reader
 
 
 def _write_env(path: Path, mode: str, extra: str = "") -> Path:
@@ -35,6 +33,11 @@ def _write_env(path: Path, mode: str, extra: str = "") -> Path:
                 "EXCEL_SLOT_ROWS=19,25,41,46,56",
                 "EXCEL_ROWS_10Y=19,25",
                 "EXCEL_ROWS_3Y=41,46,56",
+                "EXCEL_INSTRUMENT_COL=A",
+                "EXCEL_QTY_COL=E",
+                "EXCEL_INPUT_COL=D",
+                "EXCEL_PNL_COL=F",
+                "EXCEL_PNL_ROW_OFFSET=3",
                 "EXCEL_PREFIX_3Y_CELL=B5",
                 "EXCEL_PREFIX_10Y_CELL=B6",
                 "EXCEL_STATUS_CELL=F2",

@@ -4,7 +4,7 @@ import re
 from datetime import datetime
 from typing import Optional
 
-from models import Quote
+from core.models import Quote
 
 
 class QuoteParseError(ValueError):

@@ -8,8 +8,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Optional, Sequence, Union
 
-from models import AppStatus
-from trigger import looking_for_from_qty
+from core.models import AppStatus
+from core.trigger import looking_for_from_qty
 
 logger = logging.getLogger("kbond_watcher")
 
@@ -109,6 +109,11 @@ class ExcelBridge:
         rows_3y: Sequence[int],
         prefix_3y_cell: str,
         prefix_10y_cell: str,
+        instrument_col: str,
+        qty_col: str,
+        input_col: str,
+        pnl_col: str,
+        pnl_row_offset: int,
         calc_wait_timeout_seconds: float = CALC_WAIT_TIMEOUT_SECONDS,
     ) -> None:
         self.workbook_name = (workbook_name or "").strip()
@@ -123,6 +128,11 @@ class ExcelBridge:
         self.rows_3y = {int(r) for r in rows_3y}
         self.prefix_3y_cell = prefix_3y_cell
         self.prefix_10y_cell = prefix_10y_cell
+        self.instrument_col = instrument_col.strip().upper()
+        self.qty_col = qty_col.strip().upper()
+        self.input_col = input_col.strip().upper()
+        self.pnl_col = pnl_col.strip().upper()
+        self.pnl_row_offset = int(pnl_row_offset)
         self.calc_wait_timeout_seconds = float(calc_wait_timeout_seconds)
         self._pythoncom: Any = None
         self._app: Any = None
@@ -226,11 +236,13 @@ class ExcelBridge:
 
         slots: list[InstrumentSlot] = []
         for row in self.slot_rows:
-            instrument = normalize_instrument(self.read_cell_text(f"A{row}"))
+            instrument = normalize_instrument(
+                self.read_cell_text(f"{self.instrument_col}{row}")
+            )
             if not instrument:
                 continue
             try:
-                qty = self.read_cell_float(f"E{row}")
+                qty = self.read_cell_float(f"{self.qty_col}{row}")
                 looking_for, required_side = looking_for_from_qty(qty)
             except (ExcelBridgeError, ValueError):
                 continue
@@ -242,14 +254,17 @@ class ExcelBridge:
                     looking_for=looking_for,
                     required_side=required_side,
                     yield_prefix=yield_prefix,
-                    input_cell=f"D{row}",
-                    qty_cell=f"E{row}",
-                    pnl_cell=f"F{row + 3}",
+                    input_cell=f"{self.input_col}{row}",
+                    qty_cell=f"{self.qty_col}{row}",
+                    pnl_cell=f"{self.pnl_col}{row + self.pnl_row_offset}",
                 )
             )
 
         if not slots:
-            raise ExcelBridgeError("no active instrument slots (check A/E cells)")
+            raise ExcelBridgeError(
+                f"no active instrument slots "
+                f"(check {self.instrument_col}/{{row}} and {self.qty_col}/{{row}})"
+            )
 
         looking_set = {s.looking_for for s in slots}
         if len(looking_set) != 1:

@@ -9,7 +9,7 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from excel_bridge import (  # noqa: E402
+from excel.bridge import (  # noqa: E402
     ExcelBridgeError,
     format_status,
     normalize_instrument,
@@ -17,7 +17,7 @@ from excel_bridge import (  # noqa: E402
     to_float,
     workbook_matches_open,
 )
-from models import AppStatus  # noqa: E402
+from core.models import AppStatus  # noqa: E402
 
 
 def test_to_float_number() -> None:

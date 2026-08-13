@@ -45,6 +45,13 @@ def _parse_int(value: str, key: str) -> int:
         raise ConfigError(f"{key} must be an integer, got {value!r}") from exc
 
 
+def _parse_column(value: str, key: str) -> str:
+    col = (value or "").strip().upper()
+    if not col or not col.isalpha():
+        raise ConfigError(f"{key} must be a column letter like A or AA, got {value!r}")
+    return col
+
+
 def _parse_int_list(value: str, key: str) -> list[int]:
     parts = [p.strip() for p in value.replace(";", ",").split(",") if p.strip()]
     if not parts:
@@ -99,6 +106,11 @@ class Config:
     excel_slot_rows: tuple[int, ...]
     excel_rows_10y: tuple[int, ...]
     excel_rows_3y: tuple[int, ...]
+    excel_instrument_col: str
+    excel_qty_col: str
+    excel_input_col: str
+    excel_pnl_col: str
+    excel_pnl_row_offset: int
     excel_prefix_3y_cell: str
     excel_prefix_10y_cell: str
     excel_status_cell: str
@@ -180,17 +192,22 @@ class Config:
             _parse_int_list(require("EXCEL_SLOT_ROWS"), "EXCEL_SLOT_ROWS")
         )
         excel_rows_10y = tuple(
-            _parse_int_list(
-                optional("EXCEL_ROWS_10Y") or "19,25",
-                "EXCEL_ROWS_10Y",
-            )
+            _parse_int_list(require("EXCEL_ROWS_10Y"), "EXCEL_ROWS_10Y")
         )
         excel_rows_3y = tuple(
-            _parse_int_list(
-                optional("EXCEL_ROWS_3Y") or "41,46,56",
-                "EXCEL_ROWS_3Y",
-            )
+            _parse_int_list(require("EXCEL_ROWS_3Y"), "EXCEL_ROWS_3Y")
         )
+        excel_instrument_col = _parse_column(
+            require("EXCEL_INSTRUMENT_COL"), "EXCEL_INSTRUMENT_COL"
+        )
+        excel_qty_col = _parse_column(require("EXCEL_QTY_COL"), "EXCEL_QTY_COL")
+        excel_input_col = _parse_column(require("EXCEL_INPUT_COL"), "EXCEL_INPUT_COL")
+        excel_pnl_col = _parse_column(require("EXCEL_PNL_COL"), "EXCEL_PNL_COL")
+        excel_pnl_row_offset = _parse_int(
+            require("EXCEL_PNL_ROW_OFFSET"), "EXCEL_PNL_ROW_OFFSET"
+        )
+        if excel_pnl_row_offset < 0:
+            raise ConfigError("EXCEL_PNL_ROW_OFFSET must be >= 0")
         excel_prefix_3y_cell = require("EXCEL_PREFIX_3Y_CELL")
         excel_prefix_10y_cell = require("EXCEL_PREFIX_10Y_CELL")
         excel_status_cell = require("EXCEL_STATUS_CELL")
@@ -270,6 +287,11 @@ class Config:
             excel_slot_rows=excel_slot_rows,
             excel_rows_10y=excel_rows_10y,
             excel_rows_3y=excel_rows_3y,
+            excel_instrument_col=excel_instrument_col,
+            excel_qty_col=excel_qty_col,
+            excel_input_col=excel_input_col,
+            excel_pnl_col=excel_pnl_col,
+            excel_pnl_row_offset=excel_pnl_row_offset,
             excel_prefix_3y_cell=excel_prefix_3y_cell,
             excel_prefix_10y_cell=excel_prefix_10y_cell,
             excel_status_cell=excel_status_cell,

@@ -9,7 +9,7 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from quote_parser import parse_quote_line
+from source.quote_parser import parse_quote_line
 
 
 @pytest.mark.parametrize(

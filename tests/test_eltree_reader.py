@@ -1,4 +1,13 @@
-from eltree_reader import TreeCandidate, normalize_lines, pick_chat_tree
+from __future__ import annotations
+
+import sys
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
+from source.eltree import TreeCandidate, normalize_lines, pick_chat_tree
 
 
 def test_normalize_lines_strips_and_dedupes() -> None:

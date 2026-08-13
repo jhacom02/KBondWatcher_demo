@@ -14,7 +14,7 @@ Windows에서 다음을 **한 번(one-shot)** 수행한다.
 4. 임계값을 만족하면 side flip 확정 메시지를 보내고 **종료**한다 (one-shot).
 5. 미달이면 계속 감시. STOP 플래그면 `STOPPED`.
 
-OCR·Selenium·카카오톡 연동은 사용하지 않는다. 소스는 MODE에 따라 TElTree 또는 FORESTBOND UIA, 전송은 `send_ui` 한 경로(대상은 MODE 프리셋)만 사용한다.
+OCR·Selenium·카카오톡 연동은 사용하지 않는다. 소스는 MODE에 따라 TElTree 또는 FORESTBOND UIA, 전송은 `send` 패키지 한 경로(대상은 MODE 프리셋)만 사용한다.
 
 ---
 
@@ -49,20 +49,15 @@ pythonw main.py --config .env
 | 경로 | 역할 |
 |------|------|
 | `main.py` | CLI·감시 루프 오케스트레이션 |
-| `config.py` | `.env` 로드·검증 (`MODE` 프리셋 포함) |
-| `models.py` | `AppStatus`, `Quote`, `TriggerResult`, `WatcherSession` |
-| `eltree_reader.py` | KBondMessenger `TElTree` 탐색·원격 항목 텍스트 읽기 |
-| `source_common.py` | watermark 공통 베이스 |
-| `source_reader_kbond.py` | MODE 1/2 TElTree 소스 |
-| `source_reader_uia.py` | MODE 3 FORESTBOND UIA 소스 |
-| `source_reader.py` | `create_source_reader(cfg)` 팩토리 |
-| `quote_parser.py` | 채팅 라인 → `Quote` (엄격 정규식) |
-| `excel_bridge.py` | 실행 중 Excel COM: 입력/자동계산 후 P&L/상태셀 |
-| `trigger.py` | Looking For별 PnL 임계·side flip·메시지 템플릿 |
-| `send_ui.py` | 범용 UI 클릭·붙여넣기·Enter (TOPMOST로 전송 대상 확보, 대상은 MODE) |
-| `logger.py` | `kbond_watcher` 로거 (파일 롤링 + 콘솔) |
+| `config/` | `.env` 로드·검증 (`MODE` 프리셋) |
+| `source/` | TElTree / UIA / quote parser / `create_source_reader` |
+| `send/` | 클릭·붙여넣기·Enter (TOPMOST, MODE 대상) |
+| `excel/` | Excel COM: 5슬롯·prefix·P&L·상태셀 |
+| `core/` | `models` / `trigger` / `logger` |
 | `vba/KBondWatcher.bas` | Excel START/STOP 매크로 |
-| `tests/` | 파서·트리거·브릿지·센더·MODE 단위 테스트 |
+| `tests/` | 단위 테스트 |
+| `tools/` | 진단 스크립트 |
+| `docs/` `logs/` `sample/` | 문서·로그·샘플 |
 | `requirements.txt` | 의존성 (`pywinauto` 포함, MODE 3) |
 | `.env` | 운영 설정 (`MODE` + Excel/타이밍/템플릿) |
 
@@ -119,7 +114,7 @@ Quote Skipped는 호가/PnL 없이 `(HH:MM:SS) Quote Skipped`만 쓴다. 호가�
 
 ---
 
-## 5. 설정 (`config.py` / `.env`)
+## 5. 설정 (`config/` / `.env`)
 
 `Config.load(path)`:
 
@@ -155,6 +150,11 @@ Quote Skipped는 호가/PnL 없이 `(HH:MM:SS) Quote Skipped`만 쓴다. 호가�
 | `EXCEL_SLOT_ROWS` | `19,25,41,46,56` |
 | `EXCEL_ROWS_10Y` | `19,25` (prefix B6) |
 | `EXCEL_ROWS_3Y` | `41,46,56` (prefix B5) |
+| `EXCEL_INSTRUMENT_COL` | 종목 열 (예: `A`) |
+| `EXCEL_QTY_COL` | Looking For 수량 열 (예: `E`) |
+| `EXCEL_INPUT_COL` | 수익률 입력 열 (예: `D`) |
+| `EXCEL_PNL_COL` | PnL 열 (예: `F`) |
+| `EXCEL_PNL_ROW_OFFSET` | PnL 행 = 슬롯행 + offset (예: `3` → F44 for row 41) |
 | `EXCEL_PREFIX_3Y_CELL` | B5 |
 | `EXCEL_PREFIX_10Y_CELL` | B6 |
 | `EXCEL_STATUS_CELL` | F2 |
@@ -163,8 +163,8 @@ Quote Skipped는 호가/PnL 없이 `(HH:MM:SS) Quote Skipped`만 쓴다. 호가�
 | `EXCEL_LAST_PNL_CELL` | I2 |
 | `EXCEL_LAST_ACTION_CELL` | J2 |
 
-슬롯: A{R} 종목(`국고` 제거), E{R} ±100, D{R} 수익률 입력, F{R+3} PnL.
-| `PNL_THRESHOLD` | 트리거 기준 (`pnl >= threshold`) |
+슬롯: `{INSTRUMENT_COL}{R}` 종목(`국고` 제거), `{QTY_COL}{R}` ±100, `{INPUT_COL}{R}` 수익률, `{PNL_COL}{R+OFFSET}` PnL.  
+| `PNL_THRESHOLD` | 트리거 기준 |
 
 ### 5.3 전송 (대상은 MODE, 타이밍만 `.env`)
 
@@ -178,7 +178,7 @@ Quote Skipped는 호가/PnL 없이 `(HH:MM:SS) Quote Skipped`만 쓴다. 호가�
 | `SEND_PASTE_PAUSE_SECONDS` | 붙여넣기 후 대기 |
 | `SEND_SEND_PAUSE_SECONDS` | Enter 후 대기 |
 
-프로세스/제목/클릭 비율은 MODE 프리셋. `send_ui`는 동일 경로를 사용한다.
+프로세스/제목/클릭 비율은 MODE 프리셋. `send` 패키지는 동일 경로를 사용한다.
 
 ### 5.4 기타
 
@@ -237,18 +237,18 @@ Quote Skipped는 호가/PnL 없이 `(HH:MM:SS) Quote Skipped`만 쓴다. 호가�
 
 ## 7. 소스 읽기 (`create_source_reader` / ElTree / UIA)
 
-MODE 1·2: KBond Messenger `TElTree` 원격 읽기 (`source_reader_kbond.py` + `eltree_reader.py`).  
-MODE 3: FORESTBOND UIA Text 수집 (`source_reader_uia.py`, KBondWatcher 로직 이식).  
-공통 watermark는 `source_common.BaseSourceReader`.
+MODE 1·2: KBond Messenger `TElTree` 원격 읽기 (`source/reader_kbond.py` + `source/eltree.py`).  
+MODE 3: FORESTBOND UIA Text 수집 (`source/reader_uia.py`).  
+공통 watermark는 `source/common.py`.
 
 ### 7.1 TElTree (MODE 1·2)
 
 1. MODE 프리셋 프로세스/제목으로 메인 창 HWND 선택(면적 최대).
 2. 자식 중 class가 `TElTree`이고, 부모 대비 중심 X 비율 ≥ 0.55 인 것 중 면적 최대를 채팅 본문으로 선택.
 3. `OpenProcess` 후 `TVM_GETCOUNT` / `TVM_GETNEXTITEM` / `TVM_GETITEM(A|W)`로 항목 순회.
-4. 메시지 ID·구조 레이아웃은 `eltree_reader.py` 상단 상수.
+4. 메시지 ID·구조 레이아웃은 `source/eltree.py` 상단 상수.
 
-폴링 중 메신저를 포그라운드로 가져오지 않는다. 클립보드는 `send_ui`에서만 사용.
+폴링 중 메신저를 포그라운드로 가져오지 않는다. 클립보드는 `send`에서만 사용.
 
 ### 7.2 창 찾기
 
@@ -326,7 +326,7 @@ MODE 3: FORESTBOND UIA Text 수집 (`source_reader_uia.py`, KBondWatcher 로직 
 
 ---
 
-## 9. Excel (`excel_bridge.py`)
+## 9. Excel (`excel/bridge.py`)
 
 ### 연결
 
@@ -363,7 +363,7 @@ MODE 3: FORESTBOND UIA Text 수집 (`source_reader_uia.py`, KBondWatcher 로직 
 
 ---
 
-## 11. 범용 UI 전송 (`send_ui.py`)
+## 11. 범용 UI 전송 (`send/ui.py`)
 
 카카오톡 API·방 검색·채팅 탭 클릭은 **없다**.  
 MODE 프리셋의 프로세스/제목 창에 붙여넣기 후 Enter한다 (MODE 1: K-Bond, MODE 2·3: Notepad).
@@ -415,9 +415,9 @@ pythonw.exe "<MAIN_PATH>" --config "<CONFIG_PATH>"
 | Const | 값 |
 |-------|-----|
 | `PYTHONW_PATH` | `pythonw.exe` |
-| `PROJECT_DIR` | `C:\mycode\KBondWatcher_kbond` |
-| `MAIN_PATH` | `C:\mycode\KBondWatcher_kbond\main.py` |
-| `CONFIG_PATH` | `C:\mycode\KBondWatcher_kbond\.env` |
+| `PROJECT_DIR` | `C:\mycode\KBondWatcher` |
+| `MAIN_PATH` | `C:\mycode\KBondWatcher\main.py` |
+| `CONFIG_PATH` | `C:\mycode\KBondWatcher\.env` |
 | `STOP_FLAG_PATH` | `C:\temp\kbond_watcher.stop` |
 | 상태 셀 | F2 Status / G2 Looking For / H2 / I2 / J2 |
 
@@ -447,7 +447,7 @@ pythonw.exe "<MAIN_PATH>" --config "<CONFIG_PATH>"
 의존성 설치·진단:
 
 ```bat
-cd C:\mycode\KBondWatcher_kbond
+cd C:\mycode\KBondWatcher
 python -m venv .venv
 .venv\Scripts\activate
 pip install -r requirements.txt

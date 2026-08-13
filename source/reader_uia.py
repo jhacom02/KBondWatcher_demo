@@ -6,7 +6,7 @@ from typing import Optional
 from pywinauto import Desktop
 from pywinauto.base_wrapper import BaseWrapper
 
-from source_common import BaseSourceReader, SourceReaderError
+from .common import BaseSourceReader, SourceReaderError
 
 logger = logging.getLogger("kbond_watcher")
 

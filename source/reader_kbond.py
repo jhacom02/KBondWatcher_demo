@@ -4,7 +4,7 @@ from typing import Optional
 
 import win32gui
 
-from eltree_reader import (
+from .eltree import (
     TREE_CLASS,
     ElTreeReaderError,
     find_chat_eltree,
@@ -12,7 +12,7 @@ from eltree_reader import (
     item_count,
     read_eltree_lines,
 )
-from source_common import BaseSourceReader, SourceReaderError
+from .common import BaseSourceReader, SourceReaderError
 
 
 class KbondSourceReader(BaseSourceReader):

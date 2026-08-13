@@ -8,14 +8,19 @@ from pathlib import Path
 from typing import Optional
 
 from config import Config, ConfigError
-from excel_bridge import ExcelBridge, ExcelBridgeError, InstrumentSlot
-from source_reader import SourceReaderError, create_source_reader
-from logger import get_logger, setup_logger
-import send_ui
-from send_ui import SendError
-from models import AppStatus, Quote, WatcherSession
-from quote_parser import format_parser_result, parse_quote_line
-from trigger import evaluate, format_message
+from excel import ExcelBridge, ExcelBridgeError, InstrumentSlot
+from source import SourceReaderError, create_source_reader, format_parser_result, parse_quote_line
+from core import (
+    AppStatus,
+    Quote,
+    WatcherSession,
+    evaluate,
+    format_message,
+    get_logger,
+    setup_logger,
+)
+import send
+from send import SendError
 
 
 def clear_stop_flag(path: Path) -> None:
@@ -59,6 +64,11 @@ def _build_excel(cfg: Config) -> ExcelBridge:
         rows_3y=cfg.excel_rows_3y,
         prefix_3y_cell=cfg.excel_prefix_3y_cell,
         prefix_10y_cell=cfg.excel_prefix_10y_cell,
+        instrument_col=cfg.excel_instrument_col,
+        qty_col=cfg.excel_qty_col,
+        input_col=cfg.excel_input_col,
+        pnl_col=cfg.excel_pnl_col,
+        pnl_row_offset=cfg.excel_pnl_row_offset,
     )
 
 
@@ -69,7 +79,7 @@ def run_diagnose_source(cfg: Config) -> int:
 
 
 def run_diagnose_send(cfg: Config) -> int:
-    print(send_ui.diagnose(cfg))
+    print(send.diagnose(cfg))
     return 0
 
 
@@ -82,7 +92,7 @@ def run_test_send(cfg: Config) -> int:
         side="BUY",
     )
     text = format_message(cfg.message_template, sample, pnl=0.0)
-    send_ui.send_text(text, cfg)
+    send.send_text(text, cfg)
     print(f"sent to {cfg.send_window_title!r}: {text}")
     return 0
 
@@ -156,7 +166,7 @@ def run_watcher(cfg: Config) -> int:
 
         reader = create_source_reader(cfg)
         reader.find_source_window()
-        send_ui.ensure_target_window(cfg)
+        send.ensure_target_window(cfg)
         reader.initialize_watermark(cfg.process_existing_on_start)
         poll_sec = cfg.poll_interval_ms / 1000.0
 
@@ -225,7 +235,7 @@ def run_watcher(cfg: Config) -> int:
                 log.info("TRIGGERED")
                 text = format_message(cfg.message_template, quote, pnl)
                 session.status = AppStatus.SENDING
-                send_ui.send_text(text, cfg)
+                send.send_text(text, cfg)
 
                 session.status = AppStatus.SENT
                 log.info("SENT")

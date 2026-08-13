@@ -2,9 +2,9 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from source_common import BaseSourceReader, SourceReaderError, message_fingerprint
-from source_reader_kbond import KbondSourceReader
-from source_reader_uia import UiaSourceReader
+from .common import BaseSourceReader, SourceReaderError, message_fingerprint
+from .reader_kbond import KbondSourceReader
+from .reader_uia import UiaSourceReader
 
 if TYPE_CHECKING:
     from config import Config
