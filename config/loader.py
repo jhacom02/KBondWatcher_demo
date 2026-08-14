@@ -115,7 +115,6 @@ class Config:
     excel_last_quote_cell: str
     excel_last_pnl_cell: str
     excel_last_action_cell: str
-    pnl_threshold: float
 
     send_process_name: str
     send_window_title: str
@@ -236,8 +235,6 @@ class Config:
                     f"EXCEL_SLOT_ROWS contains {row} not in EXCEL_ROWS_10Y/3Y"
                 )
 
-        pnl_threshold = _parse_float(require("PNL_THRESHOLD"), "PNL_THRESHOLD")
-
         message_template = require("MESSAGE_TEMPLATE")
         if not message_template:
             raise ConfigError("MESSAGE_TEMPLATE must not be empty")
@@ -301,7 +298,6 @@ class Config:
             excel_last_quote_cell=excel_last_quote_cell,
             excel_last_pnl_cell=excel_last_pnl_cell,
             excel_last_action_cell=excel_last_action_cell,
-            pnl_threshold=pnl_threshold,
             send_process_name=send_process_name,
             send_window_title=send_window_title,
             message_template=message_template,

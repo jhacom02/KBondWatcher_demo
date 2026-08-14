@@ -5,6 +5,7 @@ from .trigger import (
     flip_side_token,
     format_message,
     looking_for_from_qty,
+    qty_magnitude,
 )
 
 __all__ = [
@@ -18,4 +19,5 @@ __all__ = [
     "flip_side_token",
     "format_message",
     "looking_for_from_qty",
+    "qty_magnitude",
 ]

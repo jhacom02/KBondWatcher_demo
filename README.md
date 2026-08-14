@@ -1,6 +1,6 @@
 # KBondWatcher
 
-One-shot watcher: source (MODE) → 5 Excel slots → PnL threshold → send (MODE).
+One-shot watcher: source (MODE) → D2-selected Excel slot → E2 PnL threshold → send (MODE).
 
 ## MODE
 
@@ -28,10 +28,10 @@ Operational defaults: `PROCESS_EXISTING_ON_START=false` (skip lines already on s
 ## Flow
 
 1. Excel START → `pythonw main.py --config .env`
-2. Load active slots from instrument/qty cols (default A/E); Looking For from qty (`-100`→`BID`/사자, `+100`→`OFFER`/팔자) → G2 only (all slots same direction)
+2. D2 selects one allowlisted slot (`EXCEL_SLOT_ROWS`); signed qty on that row (negative→`BID`, positive→`OFFER`; abs=억 size) → G2. Threshold from E2.
 3. Yield prefix: B6 → rows 19/25; B5 → rows 41/46/56 (cells/rows from `.env`)
-4. Chat match → write input col → wait `CalculationState==xlDone` → read PnL col at row+offset
-5. Threshold hit → send flipped `{confirm_token} ㅎㅈ` → exit (one-shot)
+4. Chat match → write that row's input col → wait `CalculationState==xlDone` → read PnL at row+offset
+5. E2 threshold hit → send flipped `{confirm_token} ㅎㅈ` → exit (one-shot)
 
 ## Diagnose
 
@@ -49,7 +49,7 @@ pytest -q
 |------|------|
 | `main.py` | CLI / orchestration |
 | `config/` | `.env` loader + MODE presets |
-| `source/` | MODE source factory, TElTree, UIA, quote parser |
+| `source/` | MODE source factory, TElTree, RichEdit, UIA, quote parser |
 | `send/` | click / paste / Enter UI send |
 | `excel/` | 5 slots + B5/B6 prefix + F2–J2 status |
 | `core/` | models, trigger, logger |

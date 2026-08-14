@@ -1,14 +1,39 @@
 from __future__ import annotations
 
 import logging
+import re
 from typing import Optional
 
 from pywinauto import Desktop
 from pywinauto.base_wrapper import BaseWrapper
 
-from .common import BaseSourceReader, SourceReaderError
+from .common import BaseSourceReader, SourceLine, SourceReaderError, source_line
 
 logger = logging.getLogger("kbond_watcher")
+
+_TIME_LINE = re.compile(
+    r"^(?:(?P<sender>.+?)\s+)?\((?P<ts>\d{1,2}:\d{2}(?::\d{2})?)\)\s*[:：]?\s*$"
+)
+
+
+def attach_preceding_time(seq: list[str]) -> list[SourceLine]:
+    out: list[SourceLine] = []
+    prev_ts: Optional[str] = None
+    for raw in seq:
+        text = (raw or "").strip()
+        if not text:
+            continue
+        time_match = _TIME_LINE.fullmatch(text)
+        if time_match is not None:
+            prev_ts = time_match.group("ts")
+            out.append(source_line(text))
+            continue
+        if prev_ts is not None:
+            out.append(source_line(text, f"({prev_ts}) : {text}"))
+            prev_ts = None
+            continue
+        out.append(source_line(text))
+    return out
 
 
 class UiaSourceReader(BaseSourceReader):
@@ -77,11 +102,10 @@ class UiaSourceReader(BaseSourceReader):
 
     def get_visible_message_lines(
         self, window: Optional[BaseWrapper] = None
-    ) -> list[str]:
+    ) -> list[SourceLine]:
         win = window or self.find_source_window()
         controls = self._collect_text_controls(win)
-        lines: list[str] = []
-        seen: set[str] = set()
+        raw_lines: list[str] = []
         for ctrl in controls:
             try:
                 raw = ctrl.window_text() or ""
@@ -89,10 +113,16 @@ class UiaSourceReader(BaseSourceReader):
                 continue
             for line in raw.splitlines():
                 cleaned = line.strip()
-                if not cleaned or cleaned in seen:
-                    continue
-                seen.add(cleaned)
-                lines.append(cleaned)
+                if cleaned:
+                    raw_lines.append(cleaned)
+        paired = attach_preceding_time(raw_lines)
+        lines: list[SourceLine] = []
+        seen: set[str] = set()
+        for item in paired:
+            if item.watermark_key in seen:
+                continue
+            seen.add(item.watermark_key)
+            lines.append(item)
         return lines
 
     def diagnose(self, max_messages: int = 200) -> str:
@@ -107,7 +137,7 @@ class UiaSourceReader(BaseSourceReader):
             handle = 0
         controls = self._collect_text_controls(win)
         lines = self.get_visible_message_lines(window=win)
-        shown = lines[: max(0, max_messages)]
+        shown = [item.watermark_key for item in lines[: max(0, max_messages)]]
         return "\n".join(
             [
                 f"window title: {title!r}",

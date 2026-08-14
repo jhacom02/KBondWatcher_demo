@@ -35,6 +35,16 @@ from source.quote_parser import parse_quote_line
             "14-",
         ),
         ("25-10 735+ *증권", "25-10", 3, 3.735, "BUY", "735+"),
+        ("25-10 695 + 100", "25-10", 3, 3.695, "BUY", "695 +"),
+        ("25-10 695 + 100억", "25-10", 3, 3.695, "BUY", "695 +"),
+        (
+            "홍길동 (16:20:30) : 25-11 23+ 100억 (...)",
+            "25-11",
+            4,
+            4.23,
+            "BUY",
+            "23+",
+        ),
     ],
 )
 def test_accept(
@@ -71,7 +81,12 @@ def test_accept(
         ("125-11 23+", "25-11", 4),
         ("25-110 23+", "25-11", 4),
         ("25-11 hello", "25-11", 4),
-        ("홍길동 (16:20:30) : 25-11 23+ 100억 (...)", "25-11", 4),
+        ("25-10 695 + 80억", "25-10", 3),
+        ("25-10 695 + 80", "25-10", 3),
+        ("25-10 695 + 100억 있나요", "25-10", 3),
+        ("25-10 695 + 100 있나요", "25-10", 3),
+        ("25-10 695 + 100 80", "25-10", 3),
+        ("25-10 695 + 있으신가요", "25-10", 3),
     ],
 )
 def test_reject(line: str, target: str, prefix: float) -> None:
@@ -85,3 +100,42 @@ def test_required_side_filter() -> None:
         parse_quote_line("25-11 23+", target="25-11", yield_prefix=4, required_side="SELL")
         is None
     )
+
+
+def test_required_qty_100_accepts_implied_and_explicit() -> None:
+    implied = parse_quote_line(
+        "25-10 695 +", target="25-10", yield_prefix=3, required_qty=100
+    )
+    assert implied is not None
+    assert implied.quantity == 100
+    explicit = parse_quote_line(
+        "25-10 695 + 100억", target="25-10", yield_prefix=3, required_qty=100
+    )
+    assert explicit is not None
+    assert explicit.quantity == 100
+    assert explicit.raw_token == "695 +"
+
+
+def test_required_qty_80_requires_explicit() -> None:
+    assert (
+        parse_quote_line(
+            "25-10 695 +", target="25-10", yield_prefix=3, required_qty=80
+        )
+        is None
+    )
+    assert (
+        parse_quote_line(
+            "25-10 695 + 100억", target="25-10", yield_prefix=3, required_qty=80
+        )
+        is None
+    )
+    hit = parse_quote_line(
+        "25-10 695 + 80억", target="25-10", yield_prefix=3, required_qty=80
+    )
+    assert hit is not None
+    assert hit.quantity == 80
+    hit_num = parse_quote_line(
+        "25-10 695 + 80", target="25-10", yield_prefix=3, required_qty=80
+    )
+    assert hit_num is not None
+    assert hit_num.quantity == 80

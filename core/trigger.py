@@ -6,12 +6,21 @@ LOOKING_OFFER = "OFFER"
 LOOKING_BID = "BID"
 
 
+def qty_magnitude(qty: float) -> int:
+    value = float(qty)
+    if abs(value) < 1e-9:
+        raise ValueError(f"qty must be a non-zero integer, got {qty!r}")
+    rounded = round(abs(value))
+    if abs(abs(value) - rounded) > 1e-6:
+        raise ValueError(f"qty must be a non-zero integer, got {qty!r}")
+    return int(rounded)
+
+
 def looking_for_from_qty(qty: float) -> tuple[str, str]:
-    if abs(qty - (-100.0)) < 1e-9:
+    qty_magnitude(qty)
+    if float(qty) < 0:
         return LOOKING_BID, "BUY"
-    if abs(qty - 100.0) < 1e-9:
-        return LOOKING_OFFER, "SELL"
-    raise ValueError(f"qty must be -100 or +100, got {qty!r}")
+    return LOOKING_OFFER, "SELL"
 
 
 def flip_side_token(raw_token: str) -> str:
@@ -35,6 +44,20 @@ def evaluate(
 ) -> TriggerResult:
     looking = (looking_for or "").upper()
     if looking == LOOKING_BID:
+        if pnl <= threshold:
+            return TriggerResult(
+                triggered=True,
+                reason=f"pnl {pnl} <= threshold {threshold}",
+                pnl=pnl,
+                quote=quote,
+            )
+        return TriggerResult(
+            triggered=False,
+            reason=f"pnl {pnl} > threshold {threshold}",
+            pnl=pnl,
+            quote=quote,
+        )
+    if looking == LOOKING_OFFER:
         if pnl >= threshold:
             return TriggerResult(
                 triggered=True,
@@ -48,26 +71,13 @@ def evaluate(
             pnl=pnl,
             quote=quote,
         )
-    if looking == LOOKING_OFFER:
-        limit = -abs(threshold)
-        if pnl <= limit:
-            return TriggerResult(
-                triggered=True,
-                reason=f"pnl {pnl} <= {limit}",
-                pnl=pnl,
-                quote=quote,
-            )
-        return TriggerResult(
-            triggered=False,
-            reason=f"pnl {pnl} > {limit}",
-            pnl=pnl,
-            quote=quote,
-        )
     raise ValueError(f"looking_for must be BID or OFFER, got {looking_for!r}")
 
 
 def format_message(template: str, quote: Quote, pnl: float) -> str:
     confirm_token = flip_side_token(quote.raw_token)
+    if quote.quantity != 100:
+        confirm_token = f"{confirm_token} {quote.quantity}억"
     return template.format(
         instrument=quote.instrument,
         raw_token=quote.raw_token,
@@ -76,4 +86,5 @@ def format_message(template: str, quote: Quote, pnl: float) -> str:
         side=quote.side,
         pnl=pnl,
         raw_line=quote.raw_line,
+        quantity=quote.quantity,
     )

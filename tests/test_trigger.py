@@ -21,24 +21,32 @@ from core.trigger import (  # noqa: E402
 def test_looking_for_from_qty() -> None:
     assert looking_for_from_qty(-100) == ("BID", "BUY")
     assert looking_for_from_qty(100) == ("OFFER", "SELL")
+    assert looking_for_from_qty(-80) == ("BID", "BUY")
+    assert looking_for_from_qty(80) == ("OFFER", "SELL")
     with pytest.raises(ValueError):
         looking_for_from_qty(0)
+    with pytest.raises(ValueError):
+        looking_for_from_qty(80.5)
 
 
-def test_evaluate_bid() -> None:
+def test_evaluate_bid_positive_threshold() -> None:
     quote = Quote("25-11", "25-11 23+", "23+", 4.23, "BUY")
-    ok = evaluate(quote, 1_500_000, 1_000_000, "BID")
-    assert ok.triggered is True
-    no = evaluate(quote, 500_000, 1_000_000, "BID")
-    assert no.triggered is False
+    assert evaluate(quote, 100_000, 100_000, "BID").triggered is True
+    assert evaluate(quote, 200_000, 100_000, "BID").triggered is False
+    assert evaluate(quote, -2_000_000, 100_000, "BID").triggered is True
+
+
+def test_evaluate_bid_negative_threshold() -> None:
+    quote = Quote("25-11", "25-11 23+", "23+", 4.23, "BUY")
+    assert evaluate(quote, -2_000_000, -2_000_000, "BID").triggered is True
+    assert evaluate(quote, -1_000_000, -2_000_000, "BID").triggered is False
 
 
 def test_evaluate_offer() -> None:
     quote = Quote("25-11", "25-11 23-", "23-", 4.23, "SELL")
-    ok = evaluate(quote, -1_500_000, 1_000_000, "OFFER")
-    assert ok.triggered is True
-    no = evaluate(quote, -500_000, 1_000_000, "OFFER")
-    assert no.triggered is False
+    assert evaluate(quote, 1_500_000, 1_000_000, "OFFER").triggered is True
+    assert evaluate(quote, 1_000_000, 1_000_000, "OFFER").triggered is True
+    assert evaluate(quote, 500_000, 1_000_000, "OFFER").triggered is False
 
 
 def test_flip_side_token() -> None:
@@ -52,3 +60,9 @@ def test_format_message_confirm_token() -> None:
     quote = Quote("25-10", "25-10 715+", "715+", 3.715, "BUY")
     text = format_message("{instrument} {confirm_token} ㅎㅈ", quote, 1500000)
     assert text == "25-10 715- ㅎㅈ"
+
+
+def test_format_message_appends_qty_when_not_100() -> None:
+    quote = Quote("25-10", "25-10 695 + 80억", "695 +", 3.695, "BUY", quantity=80)
+    text = format_message("{instrument} {confirm_token} ㅎㅈ", quote, 1500000)
+    assert text == "25-10 695 - 80억 ㅎㅈ"

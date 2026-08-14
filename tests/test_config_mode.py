@@ -23,7 +23,6 @@ def _write_env(path: Path, mode: str, extra: str = "") -> Path:
                 f"MODE={mode}",
                 "POLL_INTERVAL_MS=300",
                 "PROCESS_EXISTING_ON_START=true",
-                "PNL_THRESHOLD=1000000",
                 "EXCEL_WORKBOOK=sample.xlsm",
                 "EXCEL_SHEET=트레이딩",
                 "EXCEL_SLOT_ROWS=19,25,41,46,56",

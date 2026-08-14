@@ -17,6 +17,7 @@ _SENDER_TS = re.compile(
 _PRICE_SIDE = re.compile(
     r"^\s+(?P<price>\d{2,3})\s*(?P<side>[+-]|사자|팔자)\s*"
 )
+_QTY = re.compile(r"^(?P<num>\d+)\s*억?")
 
 
 def build_target_pattern(target: str) -> re.Pattern[str]:
@@ -64,6 +65,7 @@ def parse_quote_line(
     target: str,
     yield_prefix: float,
     required_side: str = "ANY",
+    required_qty: int = 100,
 ) -> Optional[Quote]:
     if not line or not line.strip():
         return None
@@ -78,8 +80,23 @@ def parse_quote_line(
         return None
     rest = after[token_match.end() :]
     rest_stripped = rest.strip()
+    parsed_qty: Optional[int] = None
     if rest_stripped and not rest_stripped.startswith(("(", "*")):
+        qty_match = _QTY.match(rest_stripped)
+        if qty_match is None:
+            return None
+        parsed_qty = int(qty_match.group("num"))
+        after_qty = rest_stripped[qty_match.end() :].strip()
+        if after_qty and not after_qty.startswith(("(", "*")):
+            return None
+    if parsed_qty is None:
+        if required_qty != 100:
+            return None
+        quantity = 100
+    elif parsed_qty != required_qty:
         return None
+    else:
+        quantity = parsed_qty
     price = token_match.group("price")
     side_marker = token_match.group("side")
     side = parse_side_marker(side_marker)
@@ -95,6 +112,7 @@ def parse_quote_line(
         side=side,
         timestamp=timestamp,
         sender=sender,
+        quantity=quantity,
     )
 
 

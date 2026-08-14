@@ -31,6 +31,7 @@ class Quote:
     side: str
     timestamp: Optional[datetime] = None
     sender: Optional[str] = None
+    quantity: int = 100
 
     @property
     def fingerprint(self) -> str:

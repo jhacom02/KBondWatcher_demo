@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import os
 import sys
 import time
 from datetime import datetime
@@ -8,8 +9,8 @@ from pathlib import Path
 from typing import Optional
 
 from config import Config, ConfigError
-from excel import ExcelBridge, ExcelBridgeError, InstrumentSlot
-from source import SourceReaderError, create_source_reader, format_parser_result, parse_quote_line
+from excel import ExcelBridge, ExcelBridgeError, InstrumentSlot, StopRequested
+from source import SourceReaderError, create_source_reader, format_parser_result, message_fingerprint, parse_quote_line
 from core import (
     AppStatus,
     Quote,
@@ -21,6 +22,29 @@ from core import (
 )
 import send
 from send import SendError
+
+
+def pid_file_path(stop_flag_path: Path) -> Path:
+    return stop_flag_path.with_suffix(".pid")
+
+
+def write_pid_file(path: Path) -> None:
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(str(os.getpid()), encoding="ascii")
+    except OSError as exc:
+        get_logger().warning("Failed to write pid file %s: %s", path, exc)
+
+
+def clear_pid_file(path: Path) -> None:
+    try:
+        if not path.is_file():
+            return
+        stored = path.read_text(encoding="ascii").strip()
+        if stored == str(os.getpid()):
+            path.unlink()
+    except OSError as exc:
+        get_logger().warning("Failed to clear pid file %s: %s", path, exc)
 
 
 def clear_stop_flag(path: Path) -> None:
@@ -101,7 +125,7 @@ def run_test_parser(cfg: Config, line: str) -> int:
     excel = _build_excel(cfg)
     try:
         excel.connect()
-        slots, looking_for = excel.load_slots()
+        slots, looking_for, _threshold = excel.load_slots()
     finally:
         excel.close()
     for slot in slots:
@@ -110,6 +134,7 @@ def run_test_parser(cfg: Config, line: str) -> int:
             target=slot.instrument,
             yield_prefix=slot.yield_prefix,
             required_side=slot.required_side,
+            required_qty=slot.qty_abs,
         )
         if quote is None:
             continue
@@ -131,6 +156,7 @@ def _match_quote(
             target=slot.instrument,
             yield_prefix=slot.yield_prefix,
             required_side=slot.required_side,
+            required_qty=slot.qty_abs,
         )
         if quote is not None:
             return quote, slot
@@ -141,12 +167,28 @@ def run_watcher(cfg: Config) -> int:
     log = get_logger()
     session = WatcherSession(status=AppStatus.STARTING)
     excel: Optional[ExcelBridge] = None
+    looking_for: Optional[str] = None
+    threshold: Optional[float] = None
+    pid_path = pid_file_path(cfg.stop_flag_path)
+    write_pid_file(pid_path)
     clear_stop_flag(cfg.stop_flag_path)
+
+    def _apply_stopped(looking_for: Optional[str] = None) -> None:
+        session.status = AppStatus.STOPPED
+        log.info("STOPPED")
+        if excel is not None:
+            excel.update_status(
+                AppStatus.STOPPED,
+                looking_for=looking_for,
+                last_action=format_last_action("Stopped"),
+            )
+        clear_stop_flag(cfg.stop_flag_path)
 
     try:
         excel = _build_excel(cfg)
+        excel.set_stop_check(lambda: stop_requested(cfg.stop_flag_path))
         excel.connect()
-        slots, looking_for = excel.load_slots()
+        slots, looking_for, threshold = excel.load_slots()
         excel.update_status(
             AppStatus.WATCHING,
             looking_for=looking_for,
@@ -154,13 +196,15 @@ def run_watcher(cfg: Config) -> int:
         )
         session.status = AppStatus.WATCHING
         log.info(
-            "WATCHING | mode=%s source=%s/%s send=%s/%s looking_for=%s slots=%s",
+            "WATCHING | mode=%s source=%s/%s send=%s/%s looking_for=%s "
+            "threshold=%s slots=%s",
             cfg.mode,
             cfg.source_process_name or "(uia)",
             cfg.source_window_title,
             cfg.send_process_name,
             cfg.send_window_title,
             looking_for,
+            threshold,
             [(s.instrument, s.row, s.required_side) for s in slots],
         )
 
@@ -172,27 +216,26 @@ def run_watcher(cfg: Config) -> int:
 
         while True:
             if stop_requested(cfg.stop_flag_path):
-                session.status = AppStatus.STOPPED
-                log.info("STOPPED")
-                excel.update_status(
-                    AppStatus.STOPPED,
-                    looking_for=looking_for,
-                    last_action=format_last_action("Stopped"),
-                )
-                clear_stop_flag(cfg.stop_flag_path)
+                _apply_stopped(looking_for)
                 return 0
 
             lines = reader.get_new_message_lines(
                 process_existing_on_start=cfg.process_existing_on_start
             )
+            if lines:
+                slots, looking_for, threshold = excel.load_slots()
 
             for line in lines:
-                quote, slot = _match_quote(line, slots)
+                if stop_requested(cfg.stop_flag_path):
+                    _apply_stopped(looking_for)
+                    return 0
+                quote, slot = _match_quote(line.text, slots)
                 if quote is None or slot is None:
                     continue
-                if quote.fingerprint in session.processed_fingerprints:
+                fp = message_fingerprint(line.watermark_key)
+                if fp in session.processed_fingerprints:
                     continue
-                session.processed_fingerprints.add(quote.fingerprint)
+                session.processed_fingerprints.add(fp)
 
                 session.status = AppStatus.QUOTE_FOUND
                 log.info(
@@ -202,7 +245,7 @@ def run_watcher(cfg: Config) -> int:
                     quote.yield_value,
                     quote.side,
                     slot.row,
-                    quote.raw_line,
+                    line.watermark_key,
                 )
 
                 session.status = AppStatus.CALCULATING
@@ -214,7 +257,7 @@ def run_watcher(cfg: Config) -> int:
                 result = evaluate(
                     quote,
                     pnl,
-                    cfg.pnl_threshold,
+                    threshold,
                     looking_for=slot.looking_for,
                 )
 
@@ -259,6 +302,9 @@ def run_watcher(cfg: Config) -> int:
 
             time.sleep(poll_sec)
 
+    except StopRequested:
+        _apply_stopped(looking_for)
+        return 0
     except (ConfigError, ExcelBridgeError, SourceReaderError, SendError) as exc:
         log.error("ERROR | %s", exc)
         if excel is not None:
@@ -276,6 +322,7 @@ def run_watcher(cfg: Config) -> int:
             )
         return 1
     finally:
+        clear_pid_file(pid_path)
         if excel is not None:
             excel.close()
 
