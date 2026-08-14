@@ -18,6 +18,7 @@ from core import (
     evaluate,
     format_message,
     get_logger,
+    pnl_outside_sanity_band,
     setup_logger,
 )
 import send
@@ -29,11 +30,8 @@ def pid_file_path(stop_flag_path: Path) -> Path:
 
 
 def write_pid_file(path: Path) -> None:
-    try:
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(str(os.getpid()), encoding="ascii")
-    except OSError as exc:
-        get_logger().warning("Failed to write pid file %s: %s", path, exc)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(str(os.getpid()), encoding="ascii")
 
 
 def clear_pid_file(path: Path) -> None:
@@ -44,24 +42,116 @@ def clear_pid_file(path: Path) -> None:
         if stored == str(os.getpid()):
             path.unlink()
     except OSError as exc:
-        get_logger().warning("Failed to clear pid file %s: %s", path, exc)
+        get_logger().error("Failed to clear pid file %s: %s", path, exc)
 
 
-def clear_stop_flag(path: Path) -> None:
+def clear_stop_flag(path: Path, *, required: bool = False) -> None:
     try:
         if path.is_file():
             path.unlink()
     except OSError as exc:
-        get_logger().warning("Failed to clear stop flag %s: %s", path, exc)
+        if required:
+            raise
+        get_logger().error("Failed to clear stop flag %s: %s", path, exc)
 
 
 def stop_requested(path: Path) -> bool:
     return path.is_file()
 
 
+def _env_file_values(path: Path) -> dict[str, str]:
+    values: dict[str, str] = {}
+    for line in path.read_text(encoding="utf-8").splitlines():
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#") or "=" not in stripped:
+            continue
+        key, _, val = stripped.partition("=")
+        values[key.strip()] = val.strip().strip('"').strip("'")
+    return values
+
+
+def report_startup_error(config_path: str | Path, message: str) -> None:
+    path = Path(config_path).expanduser()
+    if not path.is_file():
+        get_logger().error("Failed to write startup Excel error: config not found")
+        return
+    try:
+        values = _env_file_values(path)
+    except OSError as exc:
+        get_logger().error("Failed to read config for Excel error: %s", exc)
+        return
+    workbook = (values.get("EXCEL_WORKBOOK") or "").strip()
+    sheet_name = (values.get("EXCEL_SHEET") or "").strip()
+    status_cell = (values.get("EXCEL_STATUS_CELL") or "").strip()
+    action_cell = (values.get("EXCEL_LAST_ACTION_CELL") or "").strip()
+    if not workbook or not status_cell or not action_cell:
+        get_logger().error(
+            "Failed to write startup Excel error: missing workbook/status/J2 in .env"
+        )
+        return
+    pythoncom = None
+    try:
+        import pythoncom as _pythoncom
+        import win32com.client
+
+        pythoncom = _pythoncom
+        pythoncom.CoInitialize()
+        app = win32com.client.GetActiveObject("Excel.Application")
+        wb = None
+        for i in range(1, app.Workbooks.Count + 1):
+            candidate = app.Workbooks(i)
+            name = str(candidate.Name)
+            full = str(candidate.FullName)
+            from excel.bridge import workbook_matches_open
+
+            if workbook_matches_open(workbook, name, full):
+                wb = candidate
+                break
+        if wb is None:
+            raise ExcelBridgeError(f"Workbook '{workbook}' is not open in Excel")
+        ws = wb.Worksheets(sheet_name) if sheet_name else wb.ActiveSheet
+        ws.Range(status_cell).Value = AppStatus.ERROR.value
+        ws.Range(action_cell).Value = format_last_action(f"Error: {message[:200]}")
+    except Exception as exc:
+        get_logger().error("Failed to write startup Excel error: %s", exc)
+    finally:
+        if pythoncom is not None:
+            try:
+                pythoncom.CoUninitialize()
+            except Exception as exc:
+                get_logger().error("Excel CoUninitialize failed: %s", exc)
+
+
 def format_last_action(action: str) -> str:
     stamp = datetime.now().strftime("%H:%M:%S")
     return f"({stamp}) {action}"
+
+
+def _write_error_cells(
+    excel: Optional[ExcelBridge],
+    cfg: Config,
+    message: str,
+    last_pnl: Optional[float] = None,
+) -> None:
+    action = format_last_action(f"Error: {message[:200]}")
+    target = excel
+    created = False
+    try:
+        if target is None:
+            target = _build_excel(cfg)
+            target.connect()
+            created = True
+        target.update_status(
+            AppStatus.ERROR,
+            last_pnl=last_pnl,
+            last_action=action,
+            ignore_error=True,
+        )
+    except Exception as exc:
+        get_logger().error("Failed to write Excel error: %s", exc)
+    finally:
+        if created and target is not None:
+            target.close()
 
 
 def build_arg_parser() -> argparse.ArgumentParser:
@@ -83,6 +173,8 @@ def _build_excel(cfg: Config) -> ExcelBridge:
         last_quote_cell=cfg.excel_last_quote_cell,
         last_pnl_cell=cfg.excel_last_pnl_cell,
         last_action_cell=cfg.excel_last_action_cell,
+        watch_cell=cfg.excel_watch_cell,
+        pnl_threshold_cell=cfg.excel_pnl_threshold_cell,
         slot_rows=cfg.excel_slot_rows,
         rows_10y=cfg.excel_rows_10y,
         rows_3y=cfg.excel_rows_3y,
@@ -169,9 +261,8 @@ def run_watcher(cfg: Config) -> int:
     excel: Optional[ExcelBridge] = None
     looking_for: Optional[str] = None
     threshold: Optional[float] = None
+    last_pnl: Optional[float] = None
     pid_path = pid_file_path(cfg.stop_flag_path)
-    write_pid_file(pid_path)
-    clear_stop_flag(cfg.stop_flag_path)
 
     def _apply_stopped(looking_for: Optional[str] = None) -> None:
         session.status = AppStatus.STOPPED
@@ -185,6 +276,8 @@ def run_watcher(cfg: Config) -> int:
         clear_stop_flag(cfg.stop_flag_path)
 
     try:
+        write_pid_file(pid_path)
+        clear_stop_flag(cfg.stop_flag_path, required=True)
         excel = _build_excel(cfg)
         excel.set_stop_check(lambda: stop_requested(cfg.stop_flag_path))
         excel.connect()
@@ -254,6 +347,16 @@ def run_watcher(cfg: Config) -> int:
                     slot.pnl_cell,
                     quote.yield_value,
                 )
+                last_pnl = pnl
+                if threshold is None:
+                    raise ExcelBridgeError("PnL threshold is not loaded")
+                if pnl_outside_sanity_band(
+                    pnl, threshold, cfg.excel_pnl_sanity_band
+                ):
+                    raise ExcelBridgeError(
+                        f"PnL {pnl} outside sanity band "
+                        f"{cfg.excel_pnl_sanity_band} of threshold {threshold}"
+                    )
                 result = evaluate(
                     quote,
                     pnl,
@@ -307,19 +410,11 @@ def run_watcher(cfg: Config) -> int:
         return 0
     except (ConfigError, ExcelBridgeError, SourceReaderError, SendError) as exc:
         log.error("ERROR | %s", exc)
-        if excel is not None:
-            excel.update_status(
-                AppStatus.ERROR,
-                last_action=format_last_action(f"Python Error: {str(exc)[:200]}"),
-            )
+        _write_error_cells(excel, cfg, str(exc), last_pnl=last_pnl)
         return 1
     except Exception as exc:
         log.exception("ERROR | unexpected: %s", exc)
-        if excel is not None:
-            excel.update_status(
-                AppStatus.ERROR,
-                last_action=format_last_action(f"Python Error: {str(exc)[:200]}"),
-            )
+        _write_error_cells(excel, cfg, str(exc), last_pnl=last_pnl)
         return 1
     finally:
         clear_pid_file(pid_path)
@@ -333,6 +428,7 @@ def main(argv: Optional[list[str]] = None) -> int:
         cfg = Config.load(args.config)
     except ConfigError as exc:
         print(f"Config error: {exc}", file=sys.stderr)
+        report_startup_error(args.config, str(exc))
         return 2
 
     setup_logger(cfg.log_path, level=cfg.log_level)

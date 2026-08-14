@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Any, Callable, Optional, Sequence, TypeVar, Union
 
 from core.models import AppStatus
-from core.trigger import looking_for_from_qty, qty_magnitude
+from core.trigger import format_looking_for_label, looking_for_from_qty, qty_magnitude
 
 logger = logging.getLogger("kbond_watcher")
 
@@ -36,9 +36,6 @@ _WATCH_A_REF = re.compile(
     re.IGNORECASE,
 )
 _T = TypeVar("_T")
-
-WATCH_INSTRUMENT_CELL = "D2"
-PNL_THRESHOLD_CELL = "E2"
 
 
 class ExcelBridgeError(RuntimeError):
@@ -72,7 +69,42 @@ class InstrumentSlot:
     pnl_cell: str
 
 
+EXCEL_CV_ERRORS = {
+    -2146826288: "#NULL!",
+    -2146826281: "#DIV/0!",
+    -2146826273: "#VALUE!",
+    -2146826265: "#REF!",
+    -2146826259: "#NAME?",
+    -2146826252: "#NUM!",
+    -2146826246: "#N/A",
+}
+
+
+def excel_cv_error_name(value: Any) -> Optional[str]:
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int):
+        return EXCEL_CV_ERRORS.get(value)
+    if isinstance(value, float) and value.is_integer():
+        return EXCEL_CV_ERRORS.get(int(value))
+    text = str(value or "").strip().upper().replace(" ", "")
+    aliases = {
+        "#NULL!": "#NULL!",
+        "#DIV/0!": "#DIV/0!",
+        "#VALUE!": "#VALUE!",
+        "#REF!": "#REF!",
+        "#NAME?": "#NAME?",
+        "#NUM!": "#NUM!",
+        "#N/A": "#N/A",
+        "#NA": "#N/A",
+    }
+    return aliases.get(text)
+
+
 def to_float(value: Any) -> float:
+    err = excel_cv_error_name(value)
+    if err is not None:
+        raise ExcelBridgeError(f"Excel cell is {err}")
     if value is None:
         raise ExcelBridgeError("Excel cell value is empty/None")
     if isinstance(value, bool):
@@ -126,7 +158,10 @@ def parse_watch_row(
     instruments_by_row: dict[int, str],
     sheet_name: str = "",
     instrument_col: str = "A",
+    *,
+    watch_cell: str,
 ) -> int:
+    cell = watch_cell.strip()
     allowed = {int(r) for r in slot_rows}
     if not allowed:
         raise ExcelBridgeError("slot row allowlist is empty")
@@ -136,13 +171,13 @@ def parse_watch_row(
         matched = _WATCH_A_REF.fullmatch(formula_text)
         if matched is None:
             raise ExcelBridgeError(
-                f"{WATCH_INSTRUMENT_CELL} formula is not a single "
+                f"{cell} formula is not a single "
                 f"{col_want}{{row}} ref: {formula_text!r}"
             )
         col = matched.group("col").upper()
         if col != col_want:
             raise ExcelBridgeError(
-                f"{WATCH_INSTRUMENT_CELL} formula must reference column "
+                f"{cell} formula must reference column "
                 f"{col_want}, got {formula_text!r}"
             )
         sheet = (
@@ -155,20 +190,20 @@ def parse_watch_row(
             not expected_sheet or sheet.casefold() != expected_sheet.casefold()
         ):
             raise ExcelBridgeError(
-                f"{WATCH_INSTRUMENT_CELL} formula must reference the current "
+                f"{cell} formula must reference the current "
                 f"sheet, got {formula_text!r}"
             )
         row = int(matched.group("row"))
         if row not in allowed:
             raise ExcelBridgeError(
-                f"{WATCH_INSTRUMENT_CELL} row {row} is not in EXCEL_SLOT_ROWS"
+                f"{cell} row {row} is not in EXCEL_SLOT_ROWS"
             )
         return row
     target = normalize_instrument(value)
     if not target:
         target = normalize_instrument(formula_text)
     if not target:
-        raise ExcelBridgeError(f"{WATCH_INSTRUMENT_CELL} is empty")
+        raise ExcelBridgeError(f"{cell} is empty")
     matches = [
         int(row)
         for row in slot_rows
@@ -177,7 +212,7 @@ def parse_watch_row(
     ]
     if len(matches) != 1:
         raise ExcelBridgeError(
-            f"{WATCH_INSTRUMENT_CELL} instrument {target!r} matches "
+            f"{cell} instrument {target!r} matches "
             f"{len(matches)} slot rows"
         )
     return matches[0]
@@ -218,6 +253,8 @@ class ExcelBridge:
         last_quote_cell: str,
         last_pnl_cell: str,
         last_action_cell: str,
+        watch_cell: str,
+        pnl_threshold_cell: str,
         slot_rows: Sequence[int],
         rows_10y: Sequence[int],
         rows_3y: Sequence[int],
@@ -237,6 +274,8 @@ class ExcelBridge:
         self.last_quote_cell = last_quote_cell
         self.last_pnl_cell = last_pnl_cell
         self.last_action_cell = last_action_cell
+        self.watch_cell = watch_cell.strip()
+        self.pnl_threshold_cell = pnl_threshold_cell.strip()
         self.slot_rows = [int(r) for r in slot_rows]
         self.rows_10y = {int(r) for r in rows_10y}
         self.rows_3y = {int(r) for r in rows_3y}
@@ -317,8 +356,10 @@ class ExcelBridge:
                 name = str(wb.Name)
                 try:
                     full = str(wb.FullName)
-                except Exception:
-                    full = ""
+                except Exception as exc:
+                    raise ExcelBridgeError(
+                        f"Failed to read FullName for workbook {name!r}: {exc}"
+                    ) from exc
                 if workbook_matches_open(self.workbook_name, name, full):
                     return wb
             raise ExcelBridgeError(
@@ -369,7 +410,7 @@ class ExcelBridge:
         self._ensure()
 
         def _read() -> tuple[Any, Any, Any, dict[int, Any], dict[int, Any], Any, Any]:
-            d2 = self._ws.Range(WATCH_INSTRUMENT_CELL)
+            watch = self._ws.Range(self.watch_cell)
             instruments: dict[int, Any] = {}
             qtys: dict[int, Any] = {}
             for row in self.slot_rows:
@@ -378,9 +419,9 @@ class ExcelBridge:
                 ).Value
                 qtys[row] = self._ws.Range(f"{self.qty_col}{row}").Value
             return (
-                d2.Formula,
-                d2.Value,
-                self._ws.Range(PNL_THRESHOLD_CELL).Value,
+                watch.Formula,
+                watch.Value,
+                self._ws.Range(self.pnl_threshold_cell).Value,
                 instruments,
                 qtys,
                 self._ws.Range(self.prefix_3y_cell).Value,
@@ -413,6 +454,7 @@ class ExcelBridge:
             instruments_by_row,
             sheet_name=self.sheet_name,
             instrument_col=self.instrument_col,
+            watch_cell=self.watch_cell,
         )
         instrument = normalize_instrument(instruments_by_row.get(row, ""))
         if not instrument:
@@ -455,7 +497,7 @@ class ExcelBridge:
             prefix_3y,
             prefix_10y,
         )
-        return [slot], looking_for, threshold
+        return [slot], format_looking_for_label(instrument, looking_for), threshold
 
     def write_yield(self, input_cell: str, yield_value: float) -> None:
         self._ensure()
@@ -474,10 +516,19 @@ class ExcelBridge:
         logger.info("PNL | %s=%s", pnl_cell, pnl)
         return pnl
 
-    def _wait_calculation_done(self) -> None:
+    def write_yield_read_pnl(
+        self,
+        input_cell: str,
+        pnl_cell: str,
+        yield_value: float,
+    ) -> float:
+        self.write_yield(input_cell, yield_value)
+        self._ensure()
         assert self._app is not None
         deadline = time.monotonic() + self.calc_wait_timeout_seconds
-        state = None
+        state: Optional[int] = None
+        last_raw: Any = None
+        last_detail = "pending"
         while True:
             try:
                 state = int(self._call_excel(lambda: self._app.CalculationState))
@@ -489,25 +540,28 @@ class ExcelBridge:
                 raise ExcelBridgeError(
                     f"Failed to read Excel CalculationState: {exc}"
                 ) from exc
-            if state == XL_DONE:
-                return
+            if state != XL_DONE:
+                last_detail = f"CalculationState={state}"
+            else:
+                last_raw = self._call_excel(lambda: self._ws.Range(pnl_cell).Value)
+                err = excel_cv_error_name(last_raw)
+                if err is not None:
+                    last_detail = err
+                else:
+                    try:
+                        pnl = to_float(last_raw)
+                        logger.info("PNL | %s=%s", pnl_cell, pnl)
+                        return pnl
+                    except ExcelBridgeError as exc:
+                        last_detail = str(exc)
             if time.monotonic() >= deadline:
                 raise ExcelBridgeError(
-                    f"Excel calculation did not finish within "
+                    f"{pnl_cell} not numeric after "
                     f"{self.calc_wait_timeout_seconds:.1f}s "
-                    f"(CalculationState={state})"
+                    f"({last_detail}, CalculationState={state}, "
+                    f"value={last_raw!r})"
                 )
             time.sleep(CALC_POLL_INTERVAL_SECONDS)
-
-    def write_yield_read_pnl(
-        self,
-        input_cell: str,
-        pnl_cell: str,
-        yield_value: float,
-    ) -> float:
-        self.write_yield(input_cell, yield_value)
-        self._wait_calculation_done()
-        return self.read_pnl(pnl_cell)
 
     def update_status(
         self,
@@ -516,6 +570,8 @@ class ExcelBridge:
         last_quote: Optional[str] = None,
         last_pnl: Optional[float] = None,
         last_action: Optional[str] = None,
+        *,
+        ignore_error: bool = False,
     ) -> None:
         try:
             self._ensure()
@@ -535,14 +591,17 @@ class ExcelBridge:
         except StopRequested:
             raise
         except Exception as exc:
-            logger.warning("Excel status update failed: %s", exc)
+            if ignore_error:
+                logger.error("Excel status update failed: %s", exc)
+                return
+            raise ExcelBridgeError(f"Excel status update failed: {exc}") from exc
 
     def close(self) -> None:
         if self._pythoncom is not None:
             try:
                 self._pythoncom.CoUninitialize()
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.error("Excel CoUninitialize failed: %s", exc)
         self._connected = False
         self._app = None
         self._wb = None

@@ -10,7 +10,7 @@ Windows에서 채권 채팅 호가를 감시하고, Excel PnL 임계값을 만�
 ### 1.1 하는 일
 
 1. `.env`의 `MODE`에 따라 채팅 소스·전송 대상을 정한다.
-2. 이미 실행 중인 Excel 워크북에서 **D2가 가리키는 한 종목 슬롯**과 E2 PnL 임계점을 읽는다.
+2. 이미 실행 중인 Excel 워크북에서 **`EXCEL_WATCH_CELL`이 가리키는 한 종목 슬롯**과 `EXCEL_PNL_THRESHOLD_CELL` PnL 임계점을 읽는다.
 3. 채팅에서 **신규 라인**만 골라 호가 파싱한다.
 4. 해당 슬롯의 수익률 입력 셀에 yield를 쓰고, PnL을 읽는다.
 5. Looking For·임계값 조건이 맞으면 side-flip 확정 문자열을 전송 대상 창에 붙여 넣고 Enter한다.
@@ -20,8 +20,8 @@ Windows에서 채권 채팅 호가를 감시하고, Excel PnL 임계값을 만�
 
 - OCR, Selenium, 카카오톡 전용 연동은 사용하지 않는다.
 - Excel을 새로 기동하지 않는다 (`GetActiveObject`로 이미 열린 인스턴스에 붙는다).
-- 소스/전송 창 identity(프로세스·제목)는 `.env`의 `SOURCE_*` / `SEND_PROCESS_NAME` 등으로 바꾸지 않는다. `MODE` 프리셋이 고정한다.
-- 전송 클릭 비율만 `.env`의 `SEND_INPUT_*_M1` / `SEND_INPUT_*_M23`으로 조절한다.
+- 소스/전송 창 identity(프로세스)는 `MODE` 프리셋이 고정한다. MODE 1·2 채팅방 제목만 `.env`의 `KBOND_CHAT_TITLE`.
+- 전송 클릭 비율은 `.env`의 `SEND_INPUT_*_M1` / `SEND_INPUT_*_M23`. MODE 1은 **분리 채팅창** 기준이라 메인 `K-Bond` 좌표를 그대로 쓰면 안 된다.
 
 ### 1.3 런타임 전제
 
@@ -29,9 +29,9 @@ Windows에서 채권 채팅 호가를 감시하고, Excel PnL 임계값을 만�
 |------|------|
 | OS | Windows |
 | Excel | 대상 워크북이 **열린 상태**, 계산 옵션 Automatic 권장 |
-| MODE 1·2 소스 | `KBondMessenger.exe`. 분리 채팅창 `TJvRichEdit`(`WM_GETTEXT`) 우선, 없으면 제목 `K-Bond`의 `TElTree` |
-| MODE 3 소스 | 창 제목에 `FORESTBOND`, UIA로 `Text` 노출 |
-| MODE 1 전송 | 동일 KBond 창 입력란 (클릭 비율) |
+| MODE 1·2 소스 | `KBondMessenger.exe`. 제목이 `KBOND_CHAT_TITLE`을 포함하는 분리 채팅창의 `TJvRichEdit`. 없으면 즉시 ERROR |
+| MODE 3 소스 | 창 제목에 `FORESTBOND`, UIA `Text` (없으면 ERROR) |
+| MODE 1 전송 | 같은 `KBOND_CHAT_TITLE` 분리창 입력란 (`SEND_INPUT_*_M1`, 창 대비 비율) |
 | MODE 2·3 전송 | `notepad.exe`, 제목에 `메모장` |
 | Python | `requirements.txt` 의존성 설치 (venv 권장) |
 
@@ -60,7 +60,7 @@ Excel VBA Start
 |--------|------|
 | `main.py` | CLI, 감시 루프, 상태 전이, 슬롯 매칭 오케스트레이션 |
 | `config/` | `.env` 로드·검증, MODE 프리셋(창 identity) |
-| `source/` | 채팅 라인 수집(TElTree / UIA), watermark, 호가 파서 |
+| `source/` | 채팅 라인 수집(RichEdit / UIA), watermark, 호가 파서 |
 | `excel/` | COM 브리지, 슬롯·Looking For, yield/PnL, 상태 셀 |
 | `core/` | 모델, 트리거·메시지 포맷, 로거 |
 | `send/` | 대상 창 활성화, 클릭·클립보드 붙여넣기·Enter |
@@ -76,8 +76,8 @@ Excel VBA Start
 
 | MODE | 소스 리더 | 소스 창 | 전송 대상 | 클릭 비율 키 |
 |------|-----------|---------|-----------|--------------|
-| 1 | `KbondSourceReader` (RichEdit / TElTree) | `KBondMessenger.exe` / 채팅 분리창 또는 제목 `K-Bond` | 동일 KBond | `SEND_INPUT_X_M1`, `SEND_INPUT_Y_M1` |
-| 2 | `KbondSourceReader` (RichEdit / TElTree) | 동일 | `notepad.exe` / `메모장` | `SEND_INPUT_X_M23`, `SEND_INPUT_Y_M23` |
+| 1 | `KbondSourceReader` (RichEdit) | `KBondMessenger.exe` / `KBOND_CHAT_TITLE` 분리창 `TJvRichEdit` | 동일 분리창 | `SEND_INPUT_X_M1`, `SEND_INPUT_Y_M1` |
+| 2 | `KbondSourceReader` (RichEdit) | 동일 | `notepad.exe` / `메모장` | `SEND_INPUT_X_M23`, `SEND_INPUT_Y_M23` |
 | 3 | `UiaSourceReader` | 제목 `FORESTBOND` (프로세스명 없음) | Notepad | `SEND_INPUT_X_M23`, `SEND_INPUT_Y_M23` |
 
 `create_source_reader(cfg)` (`source/reader.py`):
@@ -100,9 +100,11 @@ Excel VBA Start
 
 코드 상수:
 
-- `KBOND_PROCESS = KBondMessenger.exe`, `KBOND_TITLE = K-Bond`
+- `KBOND_PROCESS = KBondMessenger.exe`
 - `FORESTBOND_TITLE = FORESTBOND`
 - `NOTEPAD_PROCESS = notepad.exe`, `NOTEPAD_TITLE = 메모장`
+
+MODE 1·2는 `.env` **`KBOND_CHAT_TITLE`** (필수, 비면 안 됨)으로 분리 채팅창을 고른다. 대소문자 무시 부분일치. 예: `[채권] 블커본드`. MODE 1 전송 제목도 이 값. MODE 3은 이 키를 쓰지 않는다.
 
 `.env`의 `SOURCE_WINDOW_TITLE`, `SOURCE_PROCESS_NAME`, `SEND_PROCESS_NAME`, `SEND_WINDOW_TITLE`는 **무시**된다.
 
@@ -110,7 +112,7 @@ Excel VBA Start
 
 | 키 | 사용 MODE | 의미 |
 |----|-----------|------|
-| `SEND_INPUT_X_M1` / `SEND_INPUT_Y_M1` | 1 | 대상 창 client 대비 클릭 비율 (0~1) |
+| `SEND_INPUT_X_M1` / `SEND_INPUT_Y_M1` | 1 | **분리 채팅창** client 대비 클릭 비율 (0~1). 메인 `K-Bond` 좌표가 아님. `--diagnose-send`로 재측정 |
 | `SEND_INPUT_X_M23` / `SEND_INPUT_Y_M23` | 2, 3 | 동일 |
 
 로드 시 MODE에 맞는 쌍만 `Config.send_input_x/y`에 넣는다. 범위 밖이면 `ConfigError`.
@@ -122,6 +124,7 @@ Excel VBA Start
 | 키 | 제약 |
 |----|------|
 | `MODE` | 1 / 2 / 3 |
+| `KBOND_CHAT_TITLE` | MODE 1·2 필수. 분리 채팅창 제목 부분일치. MODE 3에서는 불필요 |
 | `POLL_INTERVAL_MS` | 정수 ≥ 100 |
 | `PROCESS_EXISTING_ON_START` | bool (`true`/`false` 등) |
 
@@ -131,21 +134,24 @@ Excel VBA Start
 |----|------|
 | `EXCEL_WORKBOOK` | 열린 통합문서 절대경로(또는 이름 매칭 가능한 값) |
 | `EXCEL_SHEET` | 선택. 비면 ActiveSheet |
-| `EXCEL_SLOT_ROWS` | 슬롯 허용 목록 (예: `19,25,41,46,56`). D2가 이 중 **한 행**만 선택 |
+| `EXCEL_SLOT_ROWS` | 슬롯 허용 목록 (예: `19,25,41,46,56`). `EXCEL_WATCH_CELL`이 이 중 **한 행**만 선택 |
 | `EXCEL_ROWS_10Y` / `EXCEL_ROWS_3Y` | prefix 셀 매핑용 행. 모든 slot row가 합집합에 속해야 함 |
 | `EXCEL_INSTRUMENT_COL` 등 | 열 문자 (A, E, D, F …) |
 | `EXCEL_PNL_ROW_OFFSET` | PnL 행 = 슬롯행 + offset (≥ 0). 41이면 F44 |
 | `EXCEL_PREFIX_3Y_CELL` / `EXCEL_PREFIX_10Y_CELL` | 예: B5 / B6 |
+| `EXCEL_WATCH_CELL` | 감시 종목 셀 (관례상 D2). `=A41` 또는 종목 문자열 |
+| `EXCEL_PNL_THRESHOLD_CELL` | PnL 임계점 셀 (관례상 E2). 부호 있는 숫자 |
+| `EXCEL_PNL_SANITY_BAND` | `|pnl - threshold|` 가 이 값을 넘으면 즉시 ERROR (예: 5000000) |
 | `EXCEL_STATUS_CELL` … `EXCEL_LAST_ACTION_CELL` | 상태 행 (관례상 F2~J2) |
 
-감시 종목은 `.env`가 아니라 시트 **D2** (`=A41` 또는 종목 문자열). 임계점은 **E2** 숫자(부호 그대로). 저장 없이 열린 워크북 COM 값. 잘못된 D2/E2는 즉시 중단.
+감시 종목·임계점 주소는 `.env`의 `EXCEL_WATCH_CELL` / `EXCEL_PNL_THRESHOLD_CELL`. 셀 값은 저장 없이 열린 워크북 COM. 잘못된 값·빈 주소는 즉시 중단.
 
 **전송·운영**
 
 | 키 | 설명 |
 |----|------|
 | `MESSAGE_TEMPLATE` | `str.format` (아래 필드) |
-| `SEND_*_PAUSE_SECONDS` | 포그라운드·클릭·붙여넣기·Enter 타이밍 |
+| `SEND_*_PAUSE_SECONDS` | 포그라운드·클릭·붙여넣기·Enter 타이밍. 이미 전경이면 Show/포그라운드 sleep 생략. `send_text`는 activate를 중복하지 않음 |
 | `STOP_FLAG_PATH` | 존재하면 STOP |
 | `LOG_LEVEL` / `LOG_PATH` | 상대 경로는 `.env` 부모 기준 |
 
@@ -163,7 +169,7 @@ Excel VBA Start
 
 ### 5.2 슬롯 (`InstrumentSlot`)
 
-`EXCEL_SLOT_ROWS`는 시트에 있는 슬롯 구조(허용 행)다. 워처는 D2로 고른 **한 행만** 로드한다. 예: D2 `=A41` → row 41.
+`EXCEL_SLOT_ROWS`는 시트에 있는 슬롯 구조(허용 행)다. 워처는 `EXCEL_WATCH_CELL`(관례상 D2)로 고른 **한 행만** 로드한다. 예: D2 `=A41` → row 41.
 
 | 필드 | 출처 |
 |------|------|
@@ -173,38 +179,39 @@ Excel VBA Start
 | `input_cell` | `{INPUT_COL}{row}` (D41) |
 | `pnl_cell` | `{PNL_COL}{row + PNL_ROW_OFFSET}` (F44) |
 
-D2 해석: Formula가 `=A41` / `=$A$41` / `=현재시트!A41`이면 그 행(허용 목록만). `=`가 아니면 표시 문자열을 허용 행 A열과 **정확히 1건** 매칭. 그 외 수식·빈칸·0/2건 매칭·다른 시트 참조는 즉시 오류.
+`EXCEL_WATCH_CELL` 해석: Formula가 `=A41` / `=$A$41` / `=현재시트!A41`이면 그 행(허용 목록만). `=`가 아니면 표시 문자열을 허용 행 A열과 **정확히 1건** 매칭. 그 외 수식·빈칸·0/2건 매칭·다른 시트 참조는 즉시 오류.
 
-E2는 PnL 임계점 float. 빈칸·비숫자는 즉시 오류. 기동 시와 **새 채팅 줄이 있을 때마다** D2/E2와 선택 슬롯을 다시 읽는다 (저장·재실행 불필요). 유휴 폴링에서는 Excel을 읽지 않는다.
+`EXCEL_PNL_THRESHOLD_CELL`(관례상 E2)는 PnL 임계점 float. 빈칸·비숫자는 즉시 오류. 기동 시와 **새 채팅 줄이 있을 때마다** 감시/임계 셀과 선택 슬롯을 다시 읽는다 (저장·재실행 불필요). 유휴 폴링에서는 Excel을 읽지 않는다.
 
 ### 5.3 Looking For · 수집 side · 트리거
 
 | E(qty) | Looking For (G2) | 파서 `required_side` | 호가 수량 | 트리거 조건 |
 |--------|------------------|----------------------|-----------|-------------|
-| 음수 (예 `-80`, `-100`) | `BID` | `BUY` (`+` / `사자`) | `abs(E)`억 | `pnl <= E2` → 확정 시 팔자 토큰 |
-| 양수 (예 `+80`, `+100`) | `OFFER` | `SELL` (`-` / `팔자`) | `abs(E)`억 | `pnl >= E2` → 확정 시 사자 토큰 |
+| 음수 (예 `-80`, `-100`) | `{종목} / BID` (예 `25-11 / BID`) | `BUY` (`+` / `사자`) | `abs(E)`억 | `pnl <=` 임계셀 → 확정 시 팔자 토큰 |
+| 양수 (예 `+80`, `+100`) | `{종목} / OFFER` (예 `25-11 / OFFER`) | `SELL` (`-` / `팔자`) | `abs(E)`억 | `pnl >=` 임계셀 → 확정 시 사자 토큰 |
 
-E2는 부호 있는 숫자 그대로다. BID인데 E2가 큰 양수면 거의 모든 호가가 확정된다.
+임계셀(`EXCEL_PNL_THRESHOLD_CELL`)은 부호 있는 숫자 그대로다. BID인데 임계가 큰 양수면 거의 모든 호가가 확정된다.
 
 ### 5.4 yield 기록과 PnL 읽기
 
 `write_yield_read_pnl(input_cell, pnl_cell, yield_value)`:
 
 1. 입력 셀에 yield 기록  
-2. `Application.CalculationState == xlDone(0)` 될 때까지 폴링 (타임아웃 30s, 간격 50ms)  
-3. PnL 셀을 float로 읽어 반환  
+2. `Application.CalculationState == xlDone(0)` 이고 PnL이 **실제 float**일 때까지 폴링 (타임아웃 30s, 간격 50ms). `#VALUE!` 등 COM 오류 정수·빈칸은 숫자로 쓰지 않고 재시도.  
+3. 타임아웃이면 `ExcelBridgeError`.  
+4. `|pnl - threshold| > EXCEL_PNL_SANITY_BAND`이면 `main`이 즉시 ERROR (I2에 해당 pnl 기록).  
 
 ### 5.5 상태 셀 (`update_status`)
 
 | 셀 (관례) | 역할 | Excel에 쓰는 값 |
 |-----------|------|-----------------|
 | F2 Status | 감시 상태 | 주로 `WATCHING` / `SENT` / `STOPPED` / `ERROR` |
-| G2 Looking For | 방향 | `BID` / `OFFER` |
+| G2 Looking For | 감시 종목·방향 | `{instrument} / BID` 또는 `{instrument} / OFFER` |
 | H2 Last Quote | 마지막 호가 | `{instrument} {raw_token}` |
 | I2 Last PnL | 마지막 PnL | 숫자 |
-| J2 Last Action | 마지막 동작 | `(HH:MM:SS) …` |
+| J2 Last Action | 마지막 동작 | `(HH:MM:SS) …` 또는 `(HH:MM:SS) Error: …` |
 
-`update_status`는 status를 항상 쓰고, 인자로 준 looking_for / last_quote / last_pnl / last_action만 선택 갱신한다. 셀 쓰기 실패는 경고 로그만 (예외로 루프를 끊지 않음).
+`update_status`는 status를 항상 쓰고, 인자로 준 looking_for / last_quote / last_pnl / last_action만 선택 갱신한다. 셀 쓰기 실패는 `ExcelBridgeError`로 즉시 종료. ERROR 기록 자체 실패만 로그.
 
 세션 내부 enum에는 `QUOTE_FOUND`, `CALCULATING`, `TRIGGERED`, `SENDING` 등도 있으나, Excel F2에는 위 운영 4종(+ WATCHING 복귀) 위주로 반영한다.
 
@@ -217,39 +224,31 @@ E2는 부호 있는 숫자 그대로다. BID인데 E2가 큰 양수면 거의 �
 
 ### 6.1 왜 방식이 둘인가
 
-| | UIA (MODE 3) | KBond RichEdit / TElTree (MODE 1·2) |
-|--|--------------|--------------------------------------|
-| 메커니즘 | Windows UI Automation 접근성 트리의 `Text` | 분리 채팅창 `TJvRichEdit`에 `WM_GETTEXT`. 없으면 메인 창 `TElTree` 메모리 읽기 |
-| 전제 | 앱이 텍스트를 UIA에 노출 | 채팅 본문이 `TJvRichEdit` 또는 `TElTree` |
+| | UIA (MODE 3) | KBond RichEdit (MODE 1·2) |
+|--|--------------|---------------------------|
+| 메커니즘 | Windows UI Automation 접근성 트리의 `Text` | 분리 채팅창 `TJvRichEdit`에 `WM_GETTEXT` / 200만 초과 시 끝 200만 `EM_GETTEXTRANGE` |
+| 전제 | 앱이 텍스트를 UIA에 노출 | 채팅 본문이 가시 `TJvRichEdit` |
 | 대상 예 | FORESTBOND | KBond Messenger |
-| 줄 형태 | 컨트롤 단위라 **조각화** 가능 | RichEdit는 `\r\n` 줄, TElTree는 노드 ≈ 한 줄 |
+| 줄 형태 | 컨트롤 단위라 **조각화** 가능 | RichEdit는 `\r\n` 줄 |
 | 범용성 | 노출된 앱에만 | KBond(Delphi) 레이아웃에 맞춤 |
 
-KBond는 UIA `Text`가 비어 있고, 채팅을 분리하면 제목에 `K-Bond`가 없는 `TfrmDetach` + `TJvRichEdit`가 된다. 그래서 MODE 1·2는 **RichEdit를 먼저** 읽고, 없을 때만 TElTree로 떨어진다. FORESTBOND는 UIA가 열려 MODE 3을 둔다. OCR은 사용하지 않는다.
+KBond는 UIA `Text`가 비어 있고, 채팅을 분리하면 제목에 `K-Bond`가 없는 `TfrmDetach` + `TJvRichEdit`가 된다. MODE 1·2는 **제목이 `KBOND_CHAT_TITLE`과 맞는 분리창의 TJvRichEdit만** 사용한다. 메인 창은 보지 않는다. 없으면 즉시 ERROR. FORESTBOND는 UIA가 열려 MODE 3을 둔다. OCR은 사용하지 않는다.
 
 ### 6.2 KBond 소스 흐름 (MODE 1·2)
 
-**RichEdit (우선):**
+1. `KBondMessenger.exe` PID의 최상위 창을 열거한 뒤, 제목에 `KBOND_CHAT_TITLE`이 포함된 창만 남긴다 (대소문자 무시 부분일치). 매칭 0건, 또는 **서로 다른 창이 2개 이상**이면 ERROR.  
+2. 그 창의 자식 중 class `TJvRichEdit`이면서 가시·면적/높이 최소값 이상인 컨트롤 중 **가장 큰 것**을 채팅 본문으로 선택 (입력란 `TRxRichEdit`는 제외). 가시 컨트롤이 없으면 ERROR.  
+3. `WM_GETTEXTLENGTH`를 먼저 본다. 직전 길이와 같으면 `WM_GETTEXT`를 생략하고 캐시한 `list[str]`을 쓴다.  
+4. 길이가 캡(2,000,000 wchar) 이하면 `WM_GETTEXT`로 본문을 읽는다. 캡을 넘으면 **끝 200만 글자만** `EM_GETTEXTRANGE`로 읽는다 (앞에서 자르지 않음, 종료하지 않음). OpenProcess 실패면 ERROR.  
+5. strip · 빈 줄 제거 · 문자열 중복 제거 → `list[str]`. 신규 비교는 맨 뒤 `WATERMARK_WINDOW`(2000)줄.  
 
-1. `KBondMessenger.exe` PID의 **가시** 최상위 창을 열거 (제목 `K-Bond` 불필요 — 분리창 `[채팅] …` 포함).  
-2. 자식 중 class `TJvRichEdit`이면서 가시·면적/높이 최소값 이상인 컨트롤 중 **가장 큰 것**을 채팅 본문으로 선택 (입력란 `TRxRichEdit`는 제외).  
-3. `WM_GETTEXTLENGTH`를 먼저 본다. 직전 길이와 같으면 `WM_GETTEXT`를 생략하고 캐시한 `list[str]`을 쓴다. 길이가 늘거나 처음이면 `WM_GETTEXT`로 본문을 읽는다.  
-4. 덤프는 스크롤과 무관한 **문서 전체**다. 위로 스크롤해도 내용이 바뀌지 않는다. strip · 빈 줄 제거 · 문자열 중복 제거 → `list[str]`.  
-5. 버퍼 상한은 약 2,000,000 wchar다. `GETTEXTLENGTH`가 이보다 크면 **앞에서 자른 본문을 쓰지 않는다** (신규는 맨 아래에 있어 절단 시 유실됨). 경고를 남기고 직전 정상 캐시를 유지한다. `--diagnose-source` 헤더의 `gettext_len` / `clipped`로 절단 여부를 확인한다.
-
-**TElTree (폴백):**
-
-1. 제목에 `K-Bond` 포함 최상위 창 선택.  
-2. 자식 `TElTree`, 부모 대비 중심 X 비율 ≥ 0.55.  
-3. `OpenProcess` 후 `TVM_GETCOUNT` / `TVM_GETITEM`으로 아이템 텍스트 수집.
-
-폴링 중 메신저를 포그라운드로 강제하지 않는다.
+폴링 중 메신저를 포그라운드로 강제하지 않는다. 방이 여러 개여도 제목이 맞는 창의 본문만 읽는다.
 
 ### 6.3 UIA 흐름 (MODE 3)
 
 1. `Desktop(backend="uia").windows()`에서 제목에 `FORESTBOND` 포함 창 → 면적 최대. **프로세스명 필터 없음.**  
-2. `Document` descendants의 `Text` 우선, 없으면 창 전체 `Text`.  
-3. `window_text`를 줄 단위로 분해 · strip. 바로 앞 줄이 시간 토큰(`권** (17:48:01) :` 또는 `(17:48:01) :`)이면 다음 줄의 `watermark_key`는 `(17:48:01) : {호가}`. 파서에 넘기는 `text`는 호가 조각 그대로.  
+2. 창의 `Text` descendants. 열거 실패 또는 컨트롤 0건이면 ERROR.  
+3. `window_text`를 줄 단위로 분해 · strip. 읽기 실패면 ERROR. 바로 앞 줄이 시간 토큰(`권** (17:48:01) :` 또는 `(17:48:01) :`)이면 다음 줄의 `watermark_key`는 `(17:48:01) : {호가}`. 파서에 넘기는 `text`는 호가 조각 그대로.  
 4. dedupe는 quote 문자열이 아니라 `watermark_key`. 같은 호가가 초만 다르면 둘 다 남는다. 시간 줄이 없으면 키 = 호가 조각 (기존과 동일).
 
 한 Text에 시각+호가가 이미 붙어 있으면 재결합하지 않는다.
@@ -356,15 +355,14 @@ MODE 3에서 파서 입력(`Quote.raw_line`)은 호가 조각이고, 세션·QUO
 
 1. 전송 프로세스 실행 여부 확인.  
 2. 프로세스 PID + 제목 부분일치 최상위 창 중 점수 최대 선택.  
-3. 복원·Show → 포그라운드 강제 (Alt / AttachThreadInput 등, `.env` 타이밍).  
-4. `send_text`:  
-   - TOPMOST on → 재포그라운드  
-   - 창 사각형 × `(send_input_x, send_input_y)` 클릭  
+3. `activate_window`: 아이콘이면 Restore, 이미 전경이면 Show/sleep 생략. 아니면 Show 후 포그라운드 (Alt / AttachThreadInput). 실패면 `SendError`.  
+4. `send_text`: activate 후 포그라운드를 **다시** 걸지 않음.  
+   - TOPMOST on → 창 사각형 × `(send_input_x, send_input_y)` 클릭  
    - 포그라운드·커서 하위 창이 대상 앱인지 검증 (아니면 `SendError` — Excel 오입력 방지)  
-   - 클립보드 → Ctrl+V → Enter  
+   - 클립보드 → Ctrl+V → 짧은 pause → Enter → 짧은 pause  
    - finally TOPMOST off  
 
-진단: `--diagnose-send`로 HWND·비율·클릭 좌표 출력.
+진단: `--diagnose-send`로 HWND·제목·비율·클릭 좌표 출력. MODE 1은 분리창을 잡은 뒤 `SEND_INPUT_*_M1`을 그 창에 맞춰 재측정한다.
 
 ---
 
@@ -385,26 +383,27 @@ MODE 3에서 파서 입력(`Quote.raw_line`)은 호가 조각이고, 세션·QUO
 
 ### 10.2 시작 시퀀스
 
-1. stop 플래그 파일 삭제 시도.  
-2. Excel connect → `load_slots`(D2 한 슬롯 + E2) → F2 `WATCHING`, J2 Start Successful.  
+1. PID 파일 기록 · stop 플래그 삭제 (실패면 즉시 ERROR).  
+2. Excel connect → `load_slots`(감시 셀 한 슬롯 + 임계셀) → F2 `WATCHING`, J2 Start Successful.  
 3. 소스 창·전송 창 resolve.  
 4. `initialize_watermark(PROCESS_EXISTING_ON_START)`.  
 5. 폴링 루프.
 
-소스/전송 창을 못 찾거나 읽기/전송/Excel 오류 시 즉시 `ERROR` (폴링 재시도 없음).
+소스/전송 창을 못 찾거나 읽기/전송/Excel 오류 시 즉시 F2 `ERROR`, J2 `(HH:MM:SS) Error: …` (폴링 재시도·폴백 없음). Config 로드 실패는 `.env`의 workbook/status/J2로 Excel ERROR 시도 후 exit 2.
 
 ### 10.3 폴링 한 사이클
 
 ```text
 stop flag? → STOPPED, return 0
 lines = get_new_message_lines(...)
-if lines: load_slots again (D2 row + E2 threshold)
+if lines: load_slots again (watch cell row + threshold cell)
 for line in lines:
     parse_quote_line against the single loaded slot
     session fingerprint 중복이면 skip
     QUOTE_FOUND 로그 (raw_token + raw_line)
-    write_yield_read_pnl (D{row} / F{row+offset})
-    evaluate vs E2
+    write_yield_read_pnl (D{row} / F{row+offset}; wait xlDone + numeric PnL)
+    if |pnl-threshold| > SANITY_BAND → ERROR
+    evaluate vs threshold cell
     if not triggered:
         H2/I2/J2 Quote Skipped, WATCHING, continue
     format_message → send_text
@@ -430,7 +429,7 @@ sleep(POLL_INTERVAL_MS)
 
 ### 10.5 매칭 순서
 
-`_match_quote`는 D2가 선택한 **슬롯 하나**만 파서에 넘긴다. 다른 `EXCEL_SLOT_ROWS` 종목은 같은 줄에 있어도 트리거되지 않는다.
+`_match_quote`는 `EXCEL_WATCH_CELL`이 선택한 **슬롯 하나**만 파서에 넘긴다. 다른 `EXCEL_SLOT_ROWS` 종목은 같은 줄에 있어도 트리거되지 않는다.
 
 ---
 
@@ -447,8 +446,9 @@ sleep(POLL_INTERVAL_MS)
 |-----|------|
 | `StartKBondWatcher` | 기존 워처 프로세스 종료 → stop 플래그 삭제 → F2~J2 클리어 → `pythonw main.py --config .env` 숨김 실행 |
 | `StopKBondWatcher` | stop 플래그 생성 → PID/`main.py` 프로세스 `taskkill` → F2=`STOPPED`, J2=`(HH:MM:SS) Stopped` |
+| Fail | F2=`ERROR`, J2=`(HH:nn:ss) Error: {Err.Description}` |
 
-Python은 COM busy(`RPC_E_SERVERCALL_RETRYLATER`)를 수 초간 재시도하고, 계산 대기·라인 처리 중에도 stop 플래그를 본다. VBA Stop은 프로세스를 직접 죽이므로 워처가 이미 죽었거나 COM에 막혀 있어도 셀이 갱신된다.
+`KillWatcher`는 이미 종료된 PID(`taskkill` 128)는 정상, 그 외는 Fail. 남은 `main.py` 정리는 **python/pythonw만** 대상으로 한다 (PowerShell 자기 명령줄에 경로가 들어 있어 전체를 매칭하면 자살을 하고 `Run`이 -1을 반환한다). Python은 COM busy를 같은 호출만 재시도하고, 계산 대기·라인 처리 중에도 stop 플래그를 본다.
 
 VBA 셀 주소 상수(F2~J2)는 `.env`의 `EXCEL_*_CELL`과 일치해야 한다.
 
@@ -458,7 +458,8 @@ VBA 셀 주소 상수(F2~J2)는 `.env`의 `EXCEL_*_CELL`과 일치해야 한다.
 
 - 로거 이름: `kbond_watcher`  
 - RotatingFileHandler (2MB × 5) + 콘솔  
-- 포맷: `%(asctime)s %(levelname)s %(message)s`
+- 포맷: `%(asctime)s %(levelname)s %(message)s`  
+- 운영 경로에 warning/폴백 없음. 예외는 즉시 ERROR.
 
 주요 키워드: `WATCHING`, `QUOTE_FOUND`, `NO_TRIGGER`, `TRIGGERED`, `SENT`, `STOPPED`, `ERROR`, `EXIT`(one-shot 시), `EXCEL_*`, `MESSAGE_SENT`, `source watermark`, `source watermark reseed`.
 
@@ -482,32 +483,34 @@ pytest -q
 |-------------|------|
 | MODE·클릭 비율 로드 | `tests/test_config_mode.py` |
 | 파서 accept/reject | `tests/test_quote_parser.py` |
-| Looking For·flip | `tests/test_trigger.py` |
-| Excel 헬퍼 | `tests/test_excel_*.py` 등 |
-| ElTree / send | 해당 test_* |
+| Looking For·sanity band | `tests/test_trigger.py` |
+| Excel 헬퍼 (CVErr 대기 포함) | `tests/test_excel_*.py` 등 |
+| RichEdit 캡·전송 pause | `tests/test_richedit_reader.py`, `tests/test_send_ui.py` |
 
 ---
 
 ## 14. 운영·유지보수 체크리스트
 
-1. `.env`의 `MODE`, `EXCEL_WORKBOOK`, `PROCESS_EXISTING_ON_START`, 클릭 비율, `STOP_FLAG_PATH` 확인.  
+1. `.env`의 `MODE`, `KBOND_CHAT_TITLE`(1·2), `EXCEL_WORKBOOK`, `PROCESS_EXISTING_ON_START`, 클릭 비율, `STOP_FLAG_PATH` 확인.  
 2. VBA 경로·`pythonw`·STOP 경로를 설치 PC에 맞게 수정.  
-3. KBond/FORESTBOND·전송 대상·Excel을 연 뒤 diagnose.  
-4. D2가 허용 목록의 한 종목을 가리키고, 그 행 E열이 0이 아닌 정수인지(부호=방향, 절댓값=억 수량), E2 임계점이 숫자인지 확인.  
+3. KBond/FORESTBOND·전송 대상·Excel을 연 뒤 diagnose. MODE 1은 분리창 제목과 M1 클릭 점이 입력란인지 확인.  
+4. `EXCEL_WATCH_CELL`이 허용 목록의 한 종목을 가리키고, 그 행 E열이 0이 아닌 정수인지(부호=방향, 절댓값=억 수량), `EXCEL_PNL_THRESHOLD_CELL`이 숫자인지 확인.  
 5. SENT 후 동작이 test-loop인지 one-shot인지 `main.py` 확인.  
 6. MODE 3 QUOTE_FOUND의 `raw_line=`은 `(시각) : 호가` 키. 파서 입력은 호가 조각.  
 7. 동일 `watermark_key`는 세션 내 재처리되지 않음. 호가 문구만 같고 시각이 다르면 MODE 3에서 재기회.  
-8. 감시 중 채팅을 위로 스크롤하면(특히 UIA) 예상 밖 줄이 신규로 보이거나 최신을 놓칠 수 있음 — 맨 아래 유지 권장.
+8. 감시 중 채팅을 위로 스크롤하면(특히 UIA) 예상 밖 줄이 신규로 보이거나 최신을 놓칠 수 있음 — 맨 아래 유지 권장.  
+9. MODE 1·2는 `KBOND_CHAT_TITLE`과 제목이 맞는 채팅 **분리창** `TJvRichEdit`가 필요하다.
 
 ### 일반적인 장애
 
 | 증상 | 점검 |
 |------|------|
-| 시작 즉시 ERROR | 소스/전송 창, Excel 미실행, 설정 키 누락 |
+| 시작 즉시 ERROR | 소스/전송 창, Excel 미실행, 설정 키 누락, J2 `Error:` |
 | WATCHING인데 무반응 | Looking For·qty, `PROCESS_EXISTING=false`로 기존 화면만 있음, diagnose-source |
 | PnL만 되고 전송 없음 | I2 vs 임계값·Looking For 방향 |
+| I2가 −2146826273 | `#VALUE!` — 수식이 숫자로 안 끝난 채 타임아웃 |
 | 전송이 Excel로 감 | diagnose-send 좌표, TOPMOST/포커스, 클릭 비율 |
-| MODE 1 트리 없음 | 채팅 분리창 `TJvRichEdit`, 또는 `TElTree`·채팅 창 위치 |
+| MODE 1·2 소스 없음 | 분리창 제목이 `KBOND_CHAT_TITLE`과 맞는지, `TJvRichEdit` |
 
 ---
 

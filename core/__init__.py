@@ -4,7 +4,9 @@ from .trigger import (
     evaluate,
     flip_side_token,
     format_message,
+    format_looking_for_label,
     looking_for_from_qty,
+    pnl_outside_sanity_band,
     qty_magnitude,
 )
 
@@ -18,6 +20,8 @@ __all__ = [
     "evaluate",
     "flip_side_token",
     "format_message",
+    "format_looking_for_label",
     "looking_for_from_qty",
+    "pnl_outside_sanity_band",
     "qty_magnitude",
 ]

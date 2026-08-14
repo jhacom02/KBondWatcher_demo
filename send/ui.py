@@ -133,8 +133,8 @@ def _force_foreground(hwnd: int, cfg: Config) -> bool:
     for attempt in (_try_alt_foreground, _attach_thread_foreground):
         try:
             attempt(hwnd)
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.error("foreground attempt failed: %s", exc)
         time.sleep(cfg.send_foreground_retry_pause_seconds)
         if win32gui.GetForegroundWindow() == hwnd:
             return True
@@ -144,13 +144,16 @@ def _force_foreground(hwnd: int, cfg: Config) -> bool:
 def activate_window(hwnd: int, cfg: Config) -> None:
     if not hwnd or not win32gui.IsWindow(hwnd):
         raise SendError("invalid window handle")
+    already_fg = win32gui.GetForegroundWindow() == hwnd
     if win32gui.IsIconic(hwnd):
         win32gui.ShowWindow(hwnd, win32con.SW_RESTORE)
-    else:
+        time.sleep(cfg.send_activate_show_pause_seconds)
+    elif not already_fg:
         win32gui.ShowWindow(hwnd, win32con.SW_SHOW)
-    time.sleep(cfg.send_activate_show_pause_seconds)
+        time.sleep(cfg.send_activate_show_pause_seconds)
     ok = _force_foreground(hwnd, cfg)
-    time.sleep(cfg.send_after_activate_pause_seconds)
+    if not already_fg:
+        time.sleep(cfg.send_after_activate_pause_seconds)
     if not ok:
         raise SendError(f"failed to foreground hwnd={hwnd}")
 
@@ -189,8 +192,8 @@ def _same_app(target: int, hwnd: int) -> bool:
         _, pid_t = win32process.GetWindowThreadProcessId(target)
         _, pid_h = win32process.GetWindowThreadProcessId(hwnd)
         return int(pid_t) == int(pid_h)
-    except Exception:
-        return False
+    except Exception as exc:
+        raise SendError(f"failed to compare send target windows: {exc}") from exc
 
 
 def ensure_target_window(cfg: Config) -> int:
@@ -209,8 +212,6 @@ def send_text(text: str, cfg: Config) -> None:
     activate_window(hwnd, cfg)
     _set_topmost(hwnd, True)
     try:
-        _force_foreground(hwnd, cfg)
-        time.sleep(cfg.send_after_activate_pause_seconds)
         _click_ratio(
             hwnd,
             cfg.send_input_x,

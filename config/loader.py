@@ -110,6 +110,9 @@ class Config:
     excel_pnl_row_offset: int
     excel_prefix_3y_cell: str
     excel_prefix_10y_cell: str
+    excel_watch_cell: str
+    excel_pnl_threshold_cell: str
+    excel_pnl_sanity_band: float
     excel_status_cell: str
     excel_looking_for_cell: str
     excel_last_quote_cell: str
@@ -169,6 +172,14 @@ class Config:
             send_window_title,
         ) = mode_presets(mode)
 
+        if mode in (1, 2):
+            chat_title = require("KBOND_CHAT_TITLE").strip()
+            if not chat_title:
+                raise ConfigError("KBOND_CHAT_TITLE must not be empty")
+            source_window_title = chat_title
+            if mode == 1:
+                send_window_title = chat_title
+
         if mode == 1:
             send_input_x = _parse_ratio(require("SEND_INPUT_X_M1"), "SEND_INPUT_X_M1")
             send_input_y = _parse_ratio(require("SEND_INPUT_Y_M1"), "SEND_INPUT_Y_M1")
@@ -209,8 +220,15 @@ class Config:
         )
         if excel_pnl_row_offset < 0:
             raise ConfigError("EXCEL_PNL_ROW_OFFSET must be >= 0")
+        excel_pnl_sanity_band = _parse_float(
+            require("EXCEL_PNL_SANITY_BAND"), "EXCEL_PNL_SANITY_BAND"
+        )
+        if excel_pnl_sanity_band <= 0:
+            raise ConfigError("EXCEL_PNL_SANITY_BAND must be > 0")
         excel_prefix_3y_cell = require("EXCEL_PREFIX_3Y_CELL")
         excel_prefix_10y_cell = require("EXCEL_PREFIX_10Y_CELL")
+        excel_watch_cell = require("EXCEL_WATCH_CELL")
+        excel_pnl_threshold_cell = require("EXCEL_PNL_THRESHOLD_CELL")
         excel_status_cell = require("EXCEL_STATUS_CELL")
         excel_looking_for_cell = require("EXCEL_LOOKING_FOR_CELL")
         excel_last_quote_cell = require("EXCEL_LAST_QUOTE_CELL")
@@ -219,6 +237,8 @@ class Config:
         for cell_key, cell_val in [
             ("EXCEL_PREFIX_3Y_CELL", excel_prefix_3y_cell),
             ("EXCEL_PREFIX_10Y_CELL", excel_prefix_10y_cell),
+            ("EXCEL_WATCH_CELL", excel_watch_cell),
+            ("EXCEL_PNL_THRESHOLD_CELL", excel_pnl_threshold_cell),
             ("EXCEL_STATUS_CELL", excel_status_cell),
             ("EXCEL_LOOKING_FOR_CELL", excel_looking_for_cell),
             ("EXCEL_LAST_QUOTE_CELL", excel_last_quote_cell),
@@ -293,6 +313,9 @@ class Config:
             excel_pnl_row_offset=excel_pnl_row_offset,
             excel_prefix_3y_cell=excel_prefix_3y_cell,
             excel_prefix_10y_cell=excel_prefix_10y_cell,
+            excel_watch_cell=excel_watch_cell,
+            excel_pnl_threshold_cell=excel_pnl_threshold_cell,
+            excel_pnl_sanity_band=excel_pnl_sanity_band,
             excel_status_cell=excel_status_cell,
             excel_looking_for_cell=excel_looking_for_cell,
             excel_last_quote_cell=excel_last_quote_cell,

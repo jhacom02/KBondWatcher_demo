@@ -43,6 +43,92 @@ def test_to_float_rejects_empty() -> None:
         to_float("  ")
 
 
+def test_to_float_rejects_cverr() -> None:
+    with pytest.raises(ExcelBridgeError, match="#VALUE!"):
+        to_float(-2146826273)
+    with pytest.raises(ExcelBridgeError, match="#VALUE!"):
+        to_float("#VALUE!")
+    with pytest.raises(ExcelBridgeError, match="#N/A"):
+        to_float("#N/A")
+
+
+def test_write_yield_read_pnl_retries_cverr(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("excel.bridge.CALC_POLL_INTERVAL_SECONDS", 0)
+    bridge = _dummy_bridge()
+    values = [-2146826273, -189049]
+
+    class _App:
+        CalculationState = 0
+
+    class _Cell:
+        def __init__(self) -> None:
+            self.Value: object = None
+
+    pnl_cell = _Cell()
+
+    class _Ws:
+        def Range(self, addr: str) -> _Cell:
+            if addr == "F44":
+                pnl_cell.Value = values.pop(0) if values else -189049
+                return pnl_cell
+            return _Cell()
+
+    bridge._app = _App()
+    bridge._ws = _Ws()
+    monkeypatch.setattr(bridge, "_call_excel", lambda fn, check_stop=True: fn())
+    monkeypatch.setattr(bridge, "write_yield", lambda *a, **k: None)
+    monkeypatch.setattr(bridge, "_ensure", lambda: None)
+    assert bridge.write_yield_read_pnl("D41", "F44", 3.7) == -189049.0
+
+
+def test_resolve_workbook_fullname_exception() -> None:
+    bridge = _dummy_bridge()
+
+    class _Wb:
+        Name = "sample.xlsm"
+
+        @property
+        def FullName(self) -> str:
+            raise RuntimeError("COM FullName failed")
+
+    class _Workbooks:
+        Count = 1
+
+        def __call__(self, index: int) -> _Wb:
+            return _Wb()
+
+    class _App:
+        Workbooks = _Workbooks()
+
+    bridge._app = _App()
+    with pytest.raises(ExcelBridgeError, match="FullName"):
+        bridge._resolve_workbook()
+
+
+def test_write_yield_read_pnl_timeout_on_cverr(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("excel.bridge.CALC_POLL_INTERVAL_SECONDS", 0)
+    bridge = _dummy_bridge()
+    bridge.calc_wait_timeout_seconds = 0
+
+    class _App:
+        CalculationState = 0
+
+    class _Cell:
+        Value = -2146826273
+
+    class _Ws:
+        def Range(self, addr: str) -> _Cell:
+            return _Cell()
+
+    bridge._app = _App()
+    bridge._ws = _Ws()
+    monkeypatch.setattr(bridge, "_call_excel", lambda fn, check_stop=True: fn())
+    monkeypatch.setattr(bridge, "write_yield", lambda *a, **k: None)
+    monkeypatch.setattr(bridge, "_ensure", lambda: None)
+    with pytest.raises(ExcelBridgeError, match="not numeric"):
+        bridge.write_yield_read_pnl("D41", "F44", 3.7)
+
+
 def test_format_status() -> None:
     assert format_status(AppStatus.SENT) == "SENT"
     assert format_status("WATCHING") == "WATCHING"
@@ -85,6 +171,8 @@ def _dummy_bridge() -> ExcelBridge:
         last_quote_cell="H2",
         last_pnl_cell="I2",
         last_action_cell="J2",
+        watch_cell="D2",
+        pnl_threshold_cell="E2",
         slot_rows=[19],
         rows_10y=[19],
         rows_3y=[41],
@@ -170,6 +258,11 @@ _INSTRUMENTS = {
 }
 
 
+def _parse_watch(*args, **kwargs):
+    kwargs.setdefault("watch_cell", "D2")
+    return parse_watch_row(*args, **kwargs)
+
+
 def test_bind_slot_cells_row_41() -> None:
     input_cell, qty_cell, pnl_cell = bind_slot_cells(41, "D", "E", "F", 3)
     assert input_cell == "D41"
@@ -179,18 +272,18 @@ def test_bind_slot_cells_row_41() -> None:
 
 def test_parse_watch_row_formula_a41() -> None:
     assert (
-        parse_watch_row("=A41", "국고 25-10", _SLOT_ROWS, _INSTRUMENTS, "트레이딩")
+        _parse_watch("=A41", "국고 25-10", _SLOT_ROWS, _INSTRUMENTS, "트레이딩")
         == 41
     )
-    assert parse_watch_row("=$A$19", None, _SLOT_ROWS, _INSTRUMENTS) == 19
+    assert _parse_watch("=$A$19", None, _SLOT_ROWS, _INSTRUMENTS) == 19
     assert (
-        parse_watch_row(
+        _parse_watch(
             "=트레이딩!A25", "국고 25-11", _SLOT_ROWS, _INSTRUMENTS, "트레이딩"
         )
         == 25
     )
     assert (
-        parse_watch_row(
+        _parse_watch(
             "='트레이딩'!A46", None, _SLOT_ROWS, _INSTRUMENTS, "트레이딩"
         )
         == 46
@@ -199,26 +292,26 @@ def test_parse_watch_row_formula_a41() -> None:
 
 def test_parse_watch_row_plain_instrument() -> None:
     assert (
-        parse_watch_row("국고 25-10", "국고 25-10", _SLOT_ROWS, _INSTRUMENTS)
+        _parse_watch("국고 25-10", "국고 25-10", _SLOT_ROWS, _INSTRUMENTS)
         == 41
     )
 
 
 def test_parse_watch_row_rejects_bad_formula() -> None:
     with pytest.raises(ExcelBridgeError):
-        parse_watch_row("=B41", None, _SLOT_ROWS, _INSTRUMENTS)
+        _parse_watch("=B41", None, _SLOT_ROWS, _INSTRUMENTS)
     with pytest.raises(ExcelBridgeError):
-        parse_watch_row("=A41+0", None, _SLOT_ROWS, _INSTRUMENTS)
+        _parse_watch("=A41+0", None, _SLOT_ROWS, _INSTRUMENTS)
     with pytest.raises(ExcelBridgeError):
-        parse_watch_row("=A99", None, _SLOT_ROWS, _INSTRUMENTS)
+        _parse_watch("=A99", None, _SLOT_ROWS, _INSTRUMENTS)
     with pytest.raises(ExcelBridgeError):
-        parse_watch_row("=Other!A41", None, _SLOT_ROWS, _INSTRUMENTS, "트레이딩")
+        _parse_watch("=Other!A41", None, _SLOT_ROWS, _INSTRUMENTS, "트레이딩")
     with pytest.raises(ExcelBridgeError):
-        parse_watch_row("", None, _SLOT_ROWS, _INSTRUMENTS)
+        _parse_watch("", None, _SLOT_ROWS, _INSTRUMENTS)
     with pytest.raises(ExcelBridgeError):
-        parse_watch_row("국고 99-99", "국고 99-99", _SLOT_ROWS, _INSTRUMENTS)
+        _parse_watch("국고 99-99", "국고 99-99", _SLOT_ROWS, _INSTRUMENTS)
     with pytest.raises(ExcelBridgeError):
-        parse_watch_row(
+        _parse_watch(
             "25-10",
             "25-10",
             _SLOT_ROWS,

@@ -1,16 +1,16 @@
 # KBondWatcher
 
-One-shot watcher: source (MODE) → D2-selected Excel slot → E2 PnL threshold → send (MODE).
+One-shot watcher: source (MODE) → `EXCEL_WATCH_CELL` slot → `EXCEL_PNL_THRESHOLD_CELL` → send (MODE).
 
 ## MODE
 
 | MODE | Source | Send |
 |------|--------|------|
-| 1 | KBondMessenger (TElTree) | KBondMessenger |
-| 2 | KBondMessenger (TElTree) | Notepad |
+| 1 | KBondMessenger (`KBOND_CHAT_TITLE` 분리창) | 같은 분리창 |
+| 2 | KBondMessenger (`KBOND_CHAT_TITLE` 분리창) | Notepad |
 | 3 | FORESTBOND (UIA) | Notepad |
 
-Source/send window identity is fixed by `MODE`. Click ratios come from `.env` (`SEND_INPUT_X_M1`/`Y_M1`, `SEND_INPUT_X_M23`/`Y_M23`).
+Source process is fixed by `MODE`. MODE 1·2 chat room title is `.env` `KBOND_CHAT_TITLE`. Click ratios come from `.env` (`SEND_INPUT_X_M1`/`Y_M1` relative to the detached chat window, `SEND_INPUT_X_M23`/`Y_M23`).
 
 ## Install
 
@@ -28,10 +28,10 @@ Operational defaults: `PROCESS_EXISTING_ON_START=false` (skip lines already on s
 ## Flow
 
 1. Excel START → `pythonw main.py --config .env`
-2. D2 selects one allowlisted slot (`EXCEL_SLOT_ROWS`); signed qty on that row (negative→`BID`, positive→`OFFER`; abs=억 size) → G2. Threshold from E2.
+2. `EXCEL_WATCH_CELL` (default D2) selects one allowlisted slot (`EXCEL_SLOT_ROWS`); signed qty on that row (negative→`BID`, positive→`OFFER`; abs=억 size) → G2 as `{instrument} / BID` or `{instrument} / OFFER`. Threshold from `EXCEL_PNL_THRESHOLD_CELL` (default E2).
 3. Yield prefix: B6 → rows 19/25; B5 → rows 41/46/56 (cells/rows from `.env`)
-4. Chat match → write that row's input col → wait `CalculationState==xlDone` → read PnL at row+offset
-5. E2 threshold hit → send flipped `{confirm_token} ㅎㅈ` → exit (one-shot)
+4. Chat match → write that row's input col → wait `xlDone` and numeric PnL → read PnL at row+offset. Abort if `|pnl-threshold|` exceeds `EXCEL_PNL_SANITY_BAND`.
+5. Threshold cell hit → send flipped `{confirm_token} ㅎㅈ` → exit (one-shot)
 
 ## Diagnose
 
@@ -49,7 +49,7 @@ pytest -q
 |------|------|
 | `main.py` | CLI / orchestration |
 | `config/` | `.env` loader + MODE presets |
-| `source/` | MODE source factory, TElTree, RichEdit, UIA, quote parser |
+| `source/` | MODE source factory, RichEdit, UIA, quote parser |
 | `send/` | click / paste / Enter UI send |
 | `excel/` | 5 slots + B5/B6 prefix + F2–J2 status |
 | `core/` | models, trigger, logger |

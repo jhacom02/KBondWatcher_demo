@@ -37,7 +37,7 @@ Public Sub StartKBondWatcher()
 
 Fail:
     Range(STATUS_CELL).Value = "ERROR"
-    Range(LAST_ACTION_CELL).Value = "VBA Error: " & Err.Description
+    Range(LAST_ACTION_CELL).Value = "(" & Format(Now, "HH:nn:ss") & ") Error: " & Err.Description
 End Sub
 
 Public Sub StopKBondWatcher()
@@ -53,7 +53,7 @@ Public Sub StopKBondWatcher()
 
 Fail:
     Range(STATUS_CELL).Value = "ERROR"
-    Range(LAST_ACTION_CELL).Value = "VBA Error: " & Err.Description
+    Range(LAST_ACTION_CELL).Value = "(" & Format(Now, "HH:nn:ss") & ") Error: " & Err.Description
 End Sub
 
 Private Function EnsureParentFolder(filePath As String) As Object
@@ -87,12 +87,14 @@ Private Sub DeleteIfExists(filePath As String)
 End Sub
 
 Private Sub KillWatcherProcesses()
-    On Error Resume Next
+    On Error GoTo KillFail
     Dim sh As Object
     Dim fso As Object
     Dim ts As Object
     Dim pidText As String
     Dim cmd As String
+    Dim killRc As Long
+    Dim psRc As Long
 
     Set sh = CreateObject("WScript.Shell")
     Set fso = CreateObject("Scripting.FileSystemObject")
@@ -103,13 +105,28 @@ Private Sub KillWatcherProcesses()
         ts.Close
         pidText = Replace(Replace(pidText, vbCr, ""), vbLf, "")
         If IsNumeric(pidText) Then
-            sh.Run "taskkill /F /PID " & CLng(pidText), 0, True
+            killRc = sh.Run("taskkill /F /PID " & CLng(pidText), 0, True)
+            ' 0 = killed, 128 = process already gone
+            If killRc <> 0 And killRc <> 128 Then
+                Err.Raise vbObjectError + 1000, "KillWatcher", "taskkill failed: " & killRc
+            End If
         End If
         If fso.FileExists(PID_PATH) Then fso.DeleteFile PID_PATH, True
     End If
 
+    ' Only python/pythonw: this PowerShell command line also contains MAIN_PATH,
+    ' so matching every process by CommandLine would Stop-Process itself (Run → -1).
     cmd = "powershell.exe -NoProfile -WindowStyle Hidden -Command " & _
-          """Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -like '*" & MAIN_PATH & "*' } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }"""
-    sh.Run cmd, 0, True
-    On Error GoTo 0
+          """Get-CimInstance Win32_Process | Where-Object { " & _
+          "($_.Name -eq 'pythonw.exe' -or $_.Name -eq 'python.exe') -and " & _
+          "$_.CommandLine -like '*" & MAIN_PATH & "*' } | " & _
+          "ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }"""
+    psRc = sh.Run(cmd, 0, True)
+    If psRc <> 0 Then
+        Err.Raise vbObjectError + 1001, "KillWatcher", "Stop-Process failed: " & psRc
+    End If
+    Exit Sub
+
+KillFail:
+    Err.Raise Err.Number, Err.Source, Err.Description
 End Sub

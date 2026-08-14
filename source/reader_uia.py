@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import logging
 import re
 from typing import Optional
 
@@ -8,8 +7,6 @@ from pywinauto import Desktop
 from pywinauto.base_wrapper import BaseWrapper
 
 from .common import BaseSourceReader, SourceLine, SourceReaderError, source_line
-
-logger = logging.getLogger("kbond_watcher")
 
 _TIME_LINE = re.compile(
     r"^(?:(?P<sender>.+?)\s+)?\((?P<ts>\d{1,2}:\d{2}(?::\d{2})?)\)\s*[:：]?\s*$"
@@ -71,33 +68,23 @@ class UiaSourceReader(BaseSourceReader):
             try:
                 rect = w.rectangle()
                 return max(0, rect.width()) * max(0, rect.height())
-            except Exception:
-                return 0
+            except Exception as exc:
+                raise SourceReaderError(
+                    f"Failed to read FORESTBOND window size: {exc}"
+                ) from exc
 
         matches.sort(key=_area, reverse=True)
         return matches[0]
 
     def _collect_text_controls(self, window: BaseWrapper) -> list[BaseWrapper]:
-        texts: list[BaseWrapper] = []
         try:
-            documents = window.descendants(control_type="Document")
-        except Exception:
-            documents = []
-        roots: list[BaseWrapper] = list(documents) if documents else [window]
-        for root in roots:
-            try:
-                controls = root.descendants(control_type="Text")
-            except Exception as exc:
-                logger.debug("Text descendants failed: %s", exc)
-                controls = []
-            texts.extend(controls)
+            texts = window.descendants(control_type="Text")
+        except Exception as exc:
+            raise SourceReaderError(
+                f"Failed to enumerate Text controls: {exc}"
+            ) from exc
         if not texts:
-            try:
-                texts = window.descendants(control_type="Text")
-            except Exception as exc:
-                raise SourceReaderError(
-                    f"Failed to enumerate Text controls: {exc}"
-                ) from exc
+            raise SourceReaderError("no UIA Text controls")
         return texts
 
     def get_visible_message_lines(
@@ -109,8 +96,8 @@ class UiaSourceReader(BaseSourceReader):
         for ctrl in controls:
             try:
                 raw = ctrl.window_text() or ""
-            except Exception:
-                continue
+            except Exception as exc:
+                raise SourceReaderError(f"Failed to read UIA Text: {exc}") from exc
             for line in raw.splitlines():
                 cleaned = line.strip()
                 if cleaned:
@@ -127,14 +114,8 @@ class UiaSourceReader(BaseSourceReader):
 
     def diagnose(self, max_messages: int = 200) -> str:
         win = self.find_source_window()
-        try:
-            title = win.window_text() or ""
-        except Exception:
-            title = ""
-        try:
-            handle = int(win.handle)
-        except Exception:
-            handle = 0
+        title = win.window_text() or ""
+        handle = int(win.handle)
         controls = self._collect_text_controls(win)
         lines = self.get_visible_message_lines(window=win)
         shown = [item.watermark_key for item in lines[: max(0, max_messages)]]

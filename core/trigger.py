@@ -23,6 +23,10 @@ def looking_for_from_qty(qty: float) -> tuple[str, str]:
     return LOOKING_OFFER, "SELL"
 
 
+def format_looking_for_label(instrument: str, looking_for: str) -> str:
+    return f"{instrument} / {looking_for}"
+
+
 def flip_side_token(raw_token: str) -> str:
     token = (raw_token or "").strip()
     if token.endswith("+"):
@@ -34,6 +38,10 @@ def flip_side_token(raw_token: str) -> str:
     if token.endswith("팔자"):
         return token[: -len("팔자")] + "사자"
     raise ValueError(f"cannot flip side token: {raw_token!r}")
+
+
+def pnl_outside_sanity_band(pnl: float, threshold: float, band: float) -> bool:
+    return abs(float(pnl) - float(threshold)) > float(band)
 
 
 def evaluate(
