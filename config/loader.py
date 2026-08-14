@@ -135,6 +135,7 @@ class Config:
     log_level: str
     log_path: Path
     config_path: Path
+    sent_after: str
 
     @classmethod
     def load(cls, config_path: str | Path) -> "Config":
@@ -195,6 +196,10 @@ class Config:
             require("PROCESS_EXISTING_ON_START"),
             "PROCESS_EXISTING_ON_START",
         )
+
+        sent_after = require("SENT_AFTER").strip().lower()
+        if sent_after not in {"exit", "loop"}:
+            raise ConfigError("SENT_AFTER must be exit or loop")
 
         excel_workbook = require("EXCEL_WORKBOOK")
         if not excel_workbook:
@@ -336,4 +341,5 @@ class Config:
             log_level=log_level,
             log_path=log_path,
             config_path=path,
+            sent_after=sent_after,
         )

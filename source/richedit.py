@@ -10,7 +10,7 @@ import win32con
 import win32gui
 import win32process
 
-from .eltree import (
+from .win32mem import (
     MEM_COMMIT,
     MEM_RELEASE,
     MEM_RESERVE,
@@ -18,8 +18,8 @@ from .eltree import (
     PROCESS_ACCESS,
     kernel32,
     normalize_lines,
+    process_is_32bit,
     process_pids,
-    _process_is_32bit,
 )
 
 CHAT_EDIT_CLASS = "TJvRichEdit"
@@ -219,7 +219,7 @@ def read_richedit_tail(hwnd: int, char_len: int, max_chars: int = MAX_TEXT_CHARS
         raise RichEditReaderError(f"OpenProcess failed for pid={pid}")
     try:
         try:
-            is_32bit = _process_is_32bit(process)
+            is_32bit = process_is_32bit(process)
         except Exception as exc:
             raise RichEditReaderError(f"IsWow64Process failed: {exc}") from exc
         text_bytes = (count + 1) * 2

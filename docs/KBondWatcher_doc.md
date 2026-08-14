@@ -1,7 +1,11 @@
-# KBondWatcher — 설계·로직 명세 (현재 코드 기준)
+# KBondWatcher — 설계·로직 명세
 
 Windows에서 채권 채팅 호가를 감시하고, Excel PnL 임계값을 만족하면 확정 메시지를 UI로 전송하는 워처이다.  
-이 문서는 **현재 저장소 구현**만 기술한다. 다른 개발자가 프로세스·모듈 경계를 파악하고 유지보수할 수 있도록 작성했다.
+이 문서는 **현재 저장소 구현**만 기술한다. 코드와 어긋나면 코드를 진실로 삼고 문서를 갱신한다.
+
+운영 원칙: **폴백 없음.** 애매하면 보내지 않고 ERROR. 재시도는 Excel COM busy·PnL 대기·전송 foreground/focus(최대 2회)·UIA Text 열거(최대 2회)만.
+
+에러 메시지·exit 코드: [`error_table.md`](error_table.md).
 
 ---
 
@@ -20,8 +24,9 @@ Windows에서 채권 채팅 호가를 감시하고, Excel PnL 임계값을 만�
 
 - OCR, Selenium, 카카오톡 전용 연동은 사용하지 않는다.
 - Excel을 새로 기동하지 않는다 (`GetActiveObject`로 이미 열린 인스턴스에 붙는다).
-- 소스/전송 창 identity(프로세스)는 `MODE` 프리셋이 고정한다. MODE 1·2 채팅방 제목만 `.env`의 `KBOND_CHAT_TITLE`.
-- 전송 클릭 비율은 `.env`의 `SEND_INPUT_*_M1` / `SEND_INPUT_*_M23`. MODE 1은 **분리 채팅창** 기준이라 메인 `K-Bond` 좌표를 그대로 쓰면 안 된다.
+- 소스/전송 프로세스 identity는 `MODE` 프리셋이 고정한다. MODE 1·2 채팅방 제목만 `.env`의 `KBOND_CHAT_TITLE`.
+- 전송 클릭 비율은 `.env`의 `SEND_INPUT_*_M1` / `SEND_INPUT_*_M23`. MODE 1은 **분리 채팅창** 기준이다.
+- 여러 종목을 동시에 감시하지 않는다. 한 폴에서 호가가 2건 이상 매칭되면 보내지 않는다.
 
 ### 1.3 런타임 전제
 
@@ -29,15 +34,15 @@ Windows에서 채권 채팅 호가를 감시하고, Excel PnL 임계값을 만�
 |------|------|
 | OS | Windows |
 | Excel | 대상 워크북이 **열린 상태**, 계산 옵션 Automatic 권장 |
-| MODE 1·2 소스 | `KBondMessenger.exe`. 제목이 `KBOND_CHAT_TITLE`을 포함하는 분리 채팅창의 `TJvRichEdit`. 없으면 즉시 ERROR |
-| MODE 3 소스 | 창 제목에 `FORESTBOND`, UIA `Text` (없으면 ERROR) |
-| MODE 1 전송 | 같은 `KBOND_CHAT_TITLE` 분리창 입력란 (`SEND_INPUT_*_M1`, 창 대비 비율) |
+| MODE 1·2 소스 | `KBondMessenger.exe`. 제목이 `KBOND_CHAT_TITLE`을 포함하는 분리 채팅창의 `TJvRichEdit` |
+| MODE 3 소스 | 창 제목에 `FORESTBOND`, UIA `Text` |
+| MODE 1 전송 | 같은 `KBOND_CHAT_TITLE` 분리창 입력란 (`SEND_INPUT_*_M1`) |
 | MODE 2·3 전송 | `notepad.exe`, 제목에 `메모장` |
-| Python | `requirements.txt` 의존성 설치 (venv 권장) |
+| Python | `requirements.txt` 의존성 (venv 권장) |
 
 ---
 
-## 2. 아키텍처 개요
+## 2. 아키텍처
 
 ```text
 Excel VBA Start
@@ -50,41 +55,42 @@ Excel VBA Start
         → loop:
               stop flag?
               get_new_message_lines
-              parse / match slot
-              write yield → read PnL
-              evaluate → skip or send
-              (현재) SENT 후 reseed → WATCHING 유지
+              배치 매칭 (0 skip / 1 proceed / 2+ ERROR)
+              write yield → wait PnL
+              load_slots 재확인 → evaluate
+              skip 또는 send_text
+              SENT_AFTER=exit 종료 / loop 이면 reseed 후 WATCHING
 ```
 
-| 패키지 | 책임 |
-|--------|------|
-| `main.py` | CLI, 감시 루프, 상태 전이, 슬롯 매칭 오케스트레이션 |
-| `config/` | `.env` 로드·검증, MODE 프리셋(창 identity) |
-| `source/` | 채팅 라인 수집(RichEdit / UIA), watermark, 호가 파서 |
+| 경로 | 책임 |
+|------|------|
+| `main.py` | CLI, 감시 루프, 배치 매칭, 상태 전이 |
+| `config/` | `.env` 로드·검증, MODE 프리셋 |
+| `source/` | 채팅 라인 수집, watermark, 호가 파서 |
+| `source/win32mem.py` | PID 열거, RichEdit 원격 메모리 상수 |
 | `excel/` | COM 브리지, 슬롯·Looking For, yield/PnL, 상태 셀 |
-| `core/` | 모델, 트리거·메시지 포맷, 로거 |
+| `core/` | Quote·세션 모델, 트리거·메시지 포맷, 로거 |
 | `send/` | 대상 창 활성화, 클릭·클립보드 붙여넣기·Enter |
-| `vba/` | Excel에서 Start/Stop |
+| `vba/` | Excel Start/Stop |
 | `tests/` | pytest |
-| `docs/` `sample/` `logs/` `tools/` | 문서·샘플·로그·진단 도구 |
+| `docs/` | 이 명세와 에러 표 |
+| `logs/` | 런타임 로그 (`LOG_PATH`, gitignore) |
 
 의존성: `pywin32`, `psutil`, `python-dotenv`, `pyautogui`, `pyperclip`, `pywinauto`, `pytest`.
 
 ---
 
-## 3. MODE와 입출력 매핑
+## 3. MODE와 입출력
 
 | MODE | 소스 리더 | 소스 창 | 전송 대상 | 클릭 비율 키 |
 |------|-----------|---------|-----------|--------------|
-| 1 | `KbondSourceReader` (RichEdit) | `KBondMessenger.exe` / `KBOND_CHAT_TITLE` 분리창 `TJvRichEdit` | 동일 분리창 | `SEND_INPUT_X_M1`, `SEND_INPUT_Y_M1` |
-| 2 | `KbondSourceReader` (RichEdit) | 동일 | `notepad.exe` / `메모장` | `SEND_INPUT_X_M23`, `SEND_INPUT_Y_M23` |
+| 1 | `KbondSourceReader` | `KBondMessenger.exe` / `KBOND_CHAT_TITLE` / `TJvRichEdit` | 동일 분리창 | `SEND_INPUT_X_M1`, `SEND_INPUT_Y_M1` |
+| 2 | `KbondSourceReader` | 동일 | `notepad.exe` / `메모장` | `SEND_INPUT_X_M23`, `SEND_INPUT_Y_M23` |
 | 3 | `UiaSourceReader` | 제목 `FORESTBOND` (프로세스명 없음) | Notepad | `SEND_INPUT_X_M23`, `SEND_INPUT_Y_M23` |
 
-`create_source_reader(cfg)` (`source/reader.py`):
+`create_source_reader` (`source/reader.py`): MODE 1·2 → KBond, MODE 3 → UIA, 그 외 `SourceReaderError`.
 
-- MODE ∈ {1, 2} → KBond 리더  
-- MODE == 3 → UIA 리더  
-- 그 외 → `SourceReaderError`
+KBond 채팅 본문은 UIA `Text`가 비어 있어 RichEdit Win32로 읽는다. FORESTBOND는 UIA `Text`가 열려 MODE 3을 둔다.
 
 ---
 
@@ -92,277 +98,216 @@ Excel VBA Start
 
 ### 4.1 로드 규칙
 
-1. `--config` 경로의 파일이 없으면 `ConfigError`.
-2. `python-dotenv`로 로드한 뒤, 파일을 다시 읽어 `key=value`를 파싱한다 (빈 줄·`#` 주석 무시, 따옴표 trim).
-3. 값 우선순위: **파일 키 > 환경변수**. 필수 키 누락·형식 오류 시 `ConfigError`.
+1. `--config` 파일이 없으면 `ConfigError`.
+2. `python-dotenv` 로드 후 파일을 다시 읽어 `key=value` 파싱 (빈 줄·`#` 무시, 따옴표 trim).
+3. 값 우선순위: **파일 키 > 환경변수**. 필수 키 누락·형식 오류 → `ConfigError`, exit 2.
 
-### 4.2 MODE 프리셋 (창 identity만)
+### 4.2 MODE 프리셋
 
-코드 상수:
+코드 상수: `KBondMessenger.exe`, `FORESTBOND`, `notepad.exe`, `메모장`.
 
-- `KBOND_PROCESS = KBondMessenger.exe`
-- `FORESTBOND_TITLE = FORESTBOND`
-- `NOTEPAD_PROCESS = notepad.exe`, `NOTEPAD_TITLE = 메모장`
+MODE 1·2는 `.env` **`KBOND_CHAT_TITLE`** (비면 안 됨)으로 분리창을 고른다. 대소문자 무시 부분일치. MODE 1 전송 제목도 이 값. MODE 3은 이 키를 쓰지 않는다.
 
-MODE 1·2는 `.env` **`KBOND_CHAT_TITLE`** (필수, 비면 안 됨)으로 분리 채팅창을 고른다. 대소문자 무시 부분일치. 예: `[채권] 블커본드`. MODE 1 전송 제목도 이 값. MODE 3은 이 키를 쓰지 않는다.
+`.env`에 `SOURCE_WINDOW_TITLE` / `SOURCE_PROCESS_NAME` / `SEND_PROCESS_NAME` / `SEND_WINDOW_TITLE`가 있어도 **무시**된다.
 
-`.env`의 `SOURCE_WINDOW_TITLE`, `SOURCE_PROCESS_NAME`, `SEND_PROCESS_NAME`, `SEND_WINDOW_TITLE`는 **무시**된다.
+### 4.3 클릭 비율
 
-### 4.3 클릭 비율 (`.env` 필수)
-
-| 키 | 사용 MODE | 의미 |
-|----|-----------|------|
-| `SEND_INPUT_X_M1` / `SEND_INPUT_Y_M1` | 1 | **분리 채팅창** client 대비 클릭 비율 (0~1). 메인 `K-Bond` 좌표가 아님. `--diagnose-send`로 재측정 |
+| 키 | MODE | 의미 |
+|----|------|------|
+| `SEND_INPUT_X_M1` / `SEND_INPUT_Y_M1` | 1 | 분리 채팅창 대비 클릭 비율 (0~1) |
 | `SEND_INPUT_X_M23` / `SEND_INPUT_Y_M23` | 2, 3 | 동일 |
 
-로드 시 MODE에 맞는 쌍만 `Config.send_input_x/y`에 넣는다. 범위 밖이면 `ConfigError`.
+로드 시 MODE에 맞는 쌍만 `Config.send_input_x/y`에 넣는다.
 
-### 4.4 필수·선택 키 요약
+### 4.4 키 요약
 
 **감시**
 
 | 키 | 제약 |
 |----|------|
 | `MODE` | 1 / 2 / 3 |
-| `KBOND_CHAT_TITLE` | MODE 1·2 필수. 분리 채팅창 제목 부분일치. MODE 3에서는 불필요 |
+| `KBOND_CHAT_TITLE` | MODE 1·2 필수 |
 | `POLL_INTERVAL_MS` | 정수 ≥ 100 |
-| `PROCESS_EXISTING_ON_START` | bool (`true`/`false` 등) |
+| `PROCESS_EXISTING_ON_START` | bool |
+| `SENT_AFTER` | `exit` (전송 후 종료) 또는 `loop` (reseed 후 계속) |
 
 **Excel**
 
 | 키 | 설명 |
 |----|------|
-| `EXCEL_WORKBOOK` | 열린 통합문서 절대경로(또는 이름 매칭 가능한 값) |
+| `EXCEL_WORKBOOK` | 열린 통합문서 경로 또는 이름 매칭 |
 | `EXCEL_SHEET` | 선택. 비면 ActiveSheet |
-| `EXCEL_SLOT_ROWS` | 슬롯 허용 목록 (예: `19,25,41,46,56`). `EXCEL_WATCH_CELL`이 이 중 **한 행**만 선택 |
-| `EXCEL_ROWS_10Y` / `EXCEL_ROWS_3Y` | prefix 셀 매핑용 행. 모든 slot row가 합집합에 속해야 함 |
-| `EXCEL_INSTRUMENT_COL` 등 | 열 문자 (A, E, D, F …) |
-| `EXCEL_PNL_ROW_OFFSET` | PnL 행 = 슬롯행 + offset (≥ 0). 41이면 F44 |
+| `EXCEL_SLOT_ROWS` | 슬롯 허용 행. 워치는 이 중 **한 행**만 |
+| `EXCEL_ROWS_10Y` / `EXCEL_ROWS_3Y` | prefix 매핑. 모든 slot row가 합집합에 속해야 함 |
+| `EXCEL_INSTRUMENT_COL` 등 | 열 문자 |
+| `EXCEL_PNL_ROW_OFFSET` | PnL 행 = 슬롯행 + offset (≥ 0) |
 | `EXCEL_PREFIX_3Y_CELL` / `EXCEL_PREFIX_10Y_CELL` | 예: B5 / B6 |
-| `EXCEL_WATCH_CELL` | 감시 종목 셀 (관례상 D2). `=A41` 또는 종목 문자열 |
-| `EXCEL_PNL_THRESHOLD_CELL` | PnL 임계점 셀 (관례상 E2). 부호 있는 숫자 |
-| `EXCEL_PNL_SANITY_BAND` | `|pnl - threshold|` 가 이 값을 넘으면 즉시 ERROR (예: 5000000) |
-| `EXCEL_STATUS_CELL` … `EXCEL_LAST_ACTION_CELL` | 상태 행 (관례상 F2~J2) |
-
-감시 종목·임계점 주소는 `.env`의 `EXCEL_WATCH_CELL` / `EXCEL_PNL_THRESHOLD_CELL`. 셀 값은 저장 없이 열린 워크북 COM. 잘못된 값·빈 주소는 즉시 중단.
+| `EXCEL_WATCH_CELL` | 감시 종목 (관례 D2) |
+| `EXCEL_PNL_THRESHOLD_CELL` | PnL 임계 (관례 E2) |
+| `EXCEL_PNL_SANITY_BAND` | `\|pnl - threshold\|` 초과 시 ERROR |
+| `EXCEL_STATUS_CELL` … `EXCEL_LAST_ACTION_CELL` | F2~J2 |
 
 **전송·운영**
 
 | 키 | 설명 |
 |----|------|
-| `MESSAGE_TEMPLATE` | `str.format` (아래 필드) |
-| `SEND_*_PAUSE_SECONDS` | 포그라운드·클릭·붙여넣기·Enter 타이밍. 이미 전경이면 Show/포그라운드 sleep 생략. `send_text`는 activate를 중복하지 않음 |
-| `STOP_FLAG_PATH` | 존재하면 STOP |
+| `MESSAGE_TEMPLATE` | `str.format` |
+| `SEND_*_PAUSE_SECONDS` | 포그라운드·클릭·붙여넣기·Enter |
+| `STOP_FLAG_PATH` | 파일이 있으면 STOP |
 | `LOG_LEVEL` / `LOG_PATH` | 상대 경로는 `.env` 부모 기준 |
 
-`MESSAGE_TEMPLATE` 치환 키: `instrument`, `raw_token`, `confirm_token`, `yield_value`, `side`, `pnl`, `raw_line`, `quantity`.
+`MESSAGE_TEMPLATE` 치환: `instrument`, `raw_token`, `confirm_token`, `yield_value`, `side`, `pnl`, `raw_line`, `quantity`.
 
 ---
 
-## 5. Excel 계약 (`excel/bridge.py`)
+## 5. Excel (`excel/bridge.py`)
 
 ### 5.1 연결
 
-- `win32com` `GetActiveObject("Excel.Application")` — Excel이 꺼져 있으면 실패.
-- 워크북: 설정 경로와 `FullName` 일치, 또는 `Name`/파일명 매칭.
-- 시트: `EXCEL_SHEET` 지정 또는 ActiveSheet.
+`GetActiveObject("Excel.Application")`. 워크북은 설정 경로와 `FullName` 일치, 또는 `Name`/파일명 매칭. RPC busy는 같은 호출만 50×0.1s 재시도.
 
-### 5.2 슬롯 (`InstrumentSlot`)
+### 5.2 슬롯
 
-`EXCEL_SLOT_ROWS`는 시트에 있는 슬롯 구조(허용 행)다. 워처는 `EXCEL_WATCH_CELL`(관례상 D2)로 고른 **한 행만** 로드한다. 예: D2 `=A41` → row 41.
+`EXCEL_SLOT_ROWS`는 허용 행이다. 워처는 `EXCEL_WATCH_CELL`로 고른 **한 행만** 로드한다.
 
 | 필드 | 출처 |
 |------|------|
-| `instrument` | `{INSTRUMENT_COL}{row}` (A41), 선행 `국고` 제거. 빈 값이면 오류 |
-| `looking_for` / `required_side` / `qty_abs` | `{QTY_COL}{row}` (E41). **0이 아닌 정수**. 부호 → 방향, 절댓값 → 호가 수량(억). 소수·0이면 오류. 다른 슬롯 E열은 읽지 않음 |
-| `yield_prefix` | 행이 10Y 목록이면 `PREFIX_10Y` 셀, 3Y면 `PREFIX_3Y` 셀. `floor(abs(값))` |
-| `input_cell` | `{INPUT_COL}{row}` (D41) |
-| `pnl_cell` | `{PNL_COL}{row + PNL_ROW_OFFSET}` (F44) |
+| `instrument` | `{INSTRUMENT_COL}{row}`, 선행 `국고` 제거 |
+| `looking_for` / `required_side` / `qty_abs` | `{QTY_COL}{row}`. 0이 아닌 정수. 부호=방향, 절댓값=억 수량 |
+| `yield_prefix` | 10Y 행 → PREFIX_10Y 셀, 3Y 행 → PREFIX_3Y. `floor(abs(값))` |
+| `input_cell` | `{INPUT_COL}{row}` |
+| `pnl_cell` | `{PNL_COL}{row + PNL_ROW_OFFSET}` |
 
-`EXCEL_WATCH_CELL` 해석: Formula가 `=A41` / `=$A$41` / `=현재시트!A41`이면 그 행(허용 목록만). `=`가 아니면 표시 문자열을 허용 행 A열과 **정확히 1건** 매칭. 그 외 수식·빈칸·0/2건 매칭·다른 시트 참조는 즉시 오류.
+감시 셀: Formula가 `=A41` / `=$A$41` / `=현재시트!A41`이면 그 행(허용 목록만). `=`가 아니면 표시 문자열을 허용 행 A열과 **정확히 1건** 매칭.
 
-`EXCEL_PNL_THRESHOLD_CELL`(관례상 E2)는 PnL 임계점 float. 빈칸·비숫자는 즉시 오류. 기동 시와 **새 채팅 줄이 있을 때마다** 감시/임계 셀과 선택 슬롯을 다시 읽는다 (저장·재실행 불필요). 유휴 폴링에서는 Excel을 읽지 않는다.
+임계셀은 float. 기동 시와 **새 채팅 줄이 있을 때마다** 슬롯·임계를 다시 읽는다. 유휴 폴링에서는 Excel을 읽지 않는다.
 
-### 5.3 Looking For · 수집 side · 트리거
+### 5.3 Looking For · 트리거
 
-| E(qty) | Looking For (G2) | 파서 `required_side` | 호가 수량 | 트리거 조건 |
-|--------|------------------|----------------------|-----------|-------------|
-| 음수 (예 `-80`, `-100`) | `{종목} / BID` (예 `25-11 / BID`) | `BUY` (`+` / `사자`) | `abs(E)`억 | `pnl <=` 임계셀 → 확정 시 팔자 토큰 |
-| 양수 (예 `+80`, `+100`) | `{종목} / OFFER` (예 `25-11 / OFFER`) | `SELL` (`-` / `팔자`) | `abs(E)`억 | `pnl >=` 임계셀 → 확정 시 사자 토큰 |
+| E(qty) | G2 | 파서 `required_side` | 트리거 |
+|--------|-----|----------------------|--------|
+| 음수 | `{종목} / BID` | `BUY` | `pnl <=` 임계 |
+| 양수 | `{종목} / OFFER` | `SELL` | `pnl >=` 임계 |
 
-임계셀(`EXCEL_PNL_THRESHOLD_CELL`)은 부호 있는 숫자 그대로다. BID인데 임계가 큰 양수면 거의 모든 호가가 확정된다.
+evaluate에는 G2 문자열이 아니라 슬롯의 `BID`/`OFFER`를 넘긴다.
 
-### 5.4 yield 기록과 PnL 읽기
+### 5.4 yield와 PnL
 
-`write_yield_read_pnl(input_cell, pnl_cell, yield_value)`:
+`write_yield_read_pnl`:
 
 1. 입력 셀에 yield 기록  
-2. `Application.CalculationState == xlDone(0)` 이고 PnL이 **실제 float**일 때까지 폴링 (타임아웃 30s, 간격 50ms). `#VALUE!` 등 COM 오류 정수·빈칸은 숫자로 쓰지 않고 재시도.  
-3. 타임아웃이면 `ExcelBridgeError`.  
-4. `|pnl - threshold| > EXCEL_PNL_SANITY_BAND`이면 `main`이 즉시 ERROR (I2에 해당 pnl 기록).  
+2. `CalculationState == xlDone(0)` 이고 PnL이 float일 때까지 대기 (30s, 50ms). CVErr·빈칸은 숫자로 쓰지 않음.  
+3. `|pnl - threshold| > EXCEL_PNL_SANITY_BAND`이면 `main`이 ERROR.
 
-### 5.5 상태 셀 (`update_status`)
+### 5.5 상태 셀
 
-| 셀 (관례) | 역할 | Excel에 쓰는 값 |
-|-----------|------|-----------------|
-| F2 Status | 감시 상태 | 주로 `WATCHING` / `SENT` / `STOPPED` / `ERROR` |
-| G2 Looking For | 감시 종목·방향 | `{instrument} / BID` 또는 `{instrument} / OFFER` |
-| H2 Last Quote | 마지막 호가 | `{instrument} {raw_token}` |
-| I2 Last PnL | 마지막 PnL | 숫자 |
-| J2 Last Action | 마지막 동작 | `(HH:MM:SS) …` 또는 `(HH:MM:SS) Error: …` |
+| 셀 | 역할 |
+|----|------|
+| F2 | `WATCHING` / `SENT` / `STOPPED` / `ERROR` |
+| G2 | `{instrument} / BID` 또는 `… / OFFER` |
+| H2 | `{instrument} {raw_token}` |
+| I2 | PnL |
+| J2 | `(HH:MM:SS) …` 또는 `(HH:MM:SS) Error: …` |
 
-`update_status`는 status를 항상 쓰고, 인자로 준 looking_for / last_quote / last_pnl / last_action만 선택 갱신한다. 셀 쓰기 실패는 `ExcelBridgeError`로 즉시 종료. ERROR 기록 자체 실패만 로그.
-
-세션 내부 enum에는 `QUOTE_FOUND`, `CALCULATING`, `TRIGGERED`, `SENDING` 등도 있으나, Excel F2에는 위 운영 4종(+ WATCHING 복귀) 위주로 반영한다.
+세션 enum에는 `QUOTE_FOUND` 등이 있으나 F2에는 위 운영 값 위주다. 셀 쓰기 실패는 즉시 종료.
 
 ---
 
-## 6. 소스 읽기와 watermark
+## 6. 소스와 watermark
 
-소스 리더는 모두 `BaseSourceReader` (`source/common.py`)를 구현한다.  
-**공통 API:** `find_source_window`, `get_visible_message_lines`, `get_new_message_lines`, `initialize_watermark`, `reseed_watermark_from_visible`, `diagnose`.
+공통 API (`source/common.py`): `find_source_window`, `get_visible_message_lines`, `get_new_message_lines`, `initialize_watermark`, `reseed_watermark_from_visible`, `diagnose`.
 
-### 6.1 왜 방식이 둘인가
+라인 식별: `SHA1(UTF-8 watermark_key)` (`message_fingerprint`). 창 크기 `WATERMARK_WINDOW` = 2000줄 (꼬리만 비교).
 
-| | UIA (MODE 3) | KBond RichEdit (MODE 1·2) |
-|--|--------------|---------------------------|
-| 메커니즘 | Windows UI Automation 접근성 트리의 `Text` | 분리 채팅창 `TJvRichEdit`에 `WM_GETTEXT` / 200만 초과 시 끝 200만 `EM_GETTEXTRANGE` |
-| 전제 | 앱이 텍스트를 UIA에 노출 | 채팅 본문이 가시 `TJvRichEdit` |
-| 대상 예 | FORESTBOND | KBond Messenger |
-| 줄 형태 | 컨트롤 단위라 **조각화** 가능 | RichEdit는 `\r\n` 줄 |
-| 범용성 | 노출된 앱에만 | KBond(Delphi) 레이아웃에 맞춤 |
+### 6.1 MODE 1·2 (RichEdit)
 
-KBond는 UIA `Text`가 비어 있고, 채팅을 분리하면 제목에 `K-Bond`가 없는 `TfrmDetach` + `TJvRichEdit`가 된다. MODE 1·2는 **제목이 `KBOND_CHAT_TITLE`과 맞는 분리창의 TJvRichEdit만** 사용한다. 메인 창은 보지 않는다. 없으면 즉시 ERROR. FORESTBOND는 UIA가 열려 MODE 3을 둔다. OCR은 사용하지 않는다.
+의도: 분리 채팅창 문서 전체를 스크롤과 무관하게 읽는다.
 
-### 6.2 KBond 소스 흐름 (MODE 1·2)
+1. `KBondMessenger.exe` 최상위 창 중 제목에 `KBOND_CHAT_TITLE` 포함. 0건 또는 **서로 다른 창 2개 이상**이면 ERROR.  
+2. 자식 `TJvRichEdit` 중 가시·면적/높이 최소 이상인 것 중 최대. 입력란 `TRxRichEdit`는 제외.  
+3. 잡은 HWND는 `IsWindow`인 동안 재사용한다. 컨트롤이 잠깐 숨어도 재탐색하지 않는다. 핸들이 파괴되면 다시 찾는다.  
+4. `WM_GETTEXTLENGTH`가 직전과 같으면 본문 API를 생략하고 캐시.  
+5. 길이 ≤ 2,000,000 wchar이면 `WM_GETTEXT`. 초과면 **끝 200만**만 `EM_GETTEXTRANGE` (종료하지 않음). OpenProcess 실패면 ERROR.  
+6. `watermark_key` = 원문 줄.
 
-1. `KBondMessenger.exe` PID의 최상위 창을 열거한 뒤, 제목에 `KBOND_CHAT_TITLE`이 포함된 창만 남긴다 (대소문자 무시 부분일치). 매칭 0건, 또는 **서로 다른 창이 2개 이상**이면 ERROR.  
-2. 그 창의 자식 중 class `TJvRichEdit`이면서 가시·면적/높이 최소값 이상인 컨트롤 중 **가장 큰 것**을 채팅 본문으로 선택 (입력란 `TRxRichEdit`는 제외). 가시 컨트롤이 없으면 ERROR.  
-3. `WM_GETTEXTLENGTH`를 먼저 본다. 직전 길이와 같으면 `WM_GETTEXT`를 생략하고 캐시한 `list[str]`을 쓴다.  
-4. 길이가 캡(2,000,000 wchar) 이하면 `WM_GETTEXT`로 본문을 읽는다. 캡을 넘으면 **끝 200만 글자만** `EM_GETTEXTRANGE`로 읽는다 (앞에서 자르지 않음, 종료하지 않음). OpenProcess 실패면 ERROR.  
-5. strip · 빈 줄 제거 · 문자열 중복 제거 → `list[str]`. 신규 비교는 맨 뒤 `WATERMARK_WINDOW`(2000)줄.  
+메신저를 포그라운드로 강제하지 않는다.
 
-폴링 중 메신저를 포그라운드로 강제하지 않는다. 방이 여러 개여도 제목이 맞는 창의 본문만 읽는다.
+### 6.2 MODE 3 (UIA)
 
-### 6.3 UIA 흐름 (MODE 3)
+의도: FORESTBOND가 접근성 트리에 노출하는 `Text`만 읽는다. 뷰포트 조각이므로 시각 토큰이 없는 호가 줄은 매칭하지 않는다.
 
-1. `Desktop(backend="uia").windows()`에서 제목에 `FORESTBOND` 포함 창 → 면적 최대. **프로세스명 필터 없음.**  
-2. 창의 `Text` descendants. 열거 실패 또는 컨트롤 0건이면 ERROR.  
-3. `window_text`를 줄 단위로 분해 · strip. 읽기 실패면 ERROR. 바로 앞 줄이 시간 토큰(`권** (17:48:01) :` 또는 `(17:48:01) :`)이면 다음 줄의 `watermark_key`는 `(17:48:01) : {호가}`. 파서에 넘기는 `text`는 호가 조각 그대로.  
-4. dedupe는 quote 문자열이 아니라 `watermark_key`. 같은 호가가 초만 다르면 둘 다 남는다. 시간 줄이 없으면 키 = 호가 조각 (기존과 동일).
+1. 제목 `FORESTBOND` 창 중 면적 최대. 폴마다 데스크톱을 다시 훑지 않고 핸들을 든다. 무효·비가시면 `find_source_window`.  
+2. `Text` descendants. 열거 예외는 최대 2회 재시도 후 ERROR. 0건이면 즉시 ERROR.  
+3. 바로 앞 줄이 시간 토큰이면 다음 줄 `watermark_key` = `(시각) : {호가}`. 파서 `text`는 호가 조각.  
+4. 한 Text에 시각+호가가 이미 붙어 있으면 재결합하지 않는다.  
+5. 매칭 시 `watermark_key`에 `(HH:MM`이 없으면 skip (ERROR 아님).
 
-한 Text에 시각+호가가 이미 붙어 있으면 재결합하지 않는다.
+위로 스크롤하면 옛 조각이 신규로 보이거나 최신이 트리에서 빠질 수 있다. 맨 아래 유지가 전제다.
 
-### 6.4 Watermark (신규 라인 게이트)
-
-라인 fingerprint = `SHA1(UTF-8 watermark_key)` hex (`message_fingerprint`). MODE 1·2는 `watermark_key =` 원문 줄. MODE 3은 가능하면 `(시각) : 호가`.
-
-게이트는 **맨 뒤 `WATERMARK_WINDOW`(2000)줄만** 본다. 앞쪽 히스토리는 비교하지 않는다. watermark는 삽입 순서 deque+set이며 창을 넘으면 가장 오래된 fp부터 삭제한다. 전체 덤프를 계속 스캔하면서 set만 FIFO로 지우면 과거 호가가 신규로 부활하므로 그렇게 하지 않는다.
-
-`TJvRichEdit`+`WM_GETTEXT`는 스크롤과 무관하게 문서 전체를 주므로, 위로 스크롤해도 창 밖 옛줄은 검사하지 않으면 재오탐이 나지 않는다. (스크롤 재오탐은 UIA MODE 3 쪽 이슈다.)
+### 6.3 Watermark
 
 | API | 동작 |
 |-----|------|
-| `initialize_watermark(false)` | 현재 덤프의 **꼬리 창** fp로 set을 **채움**. 이후 그 창에 새로 들어온 문자열만 통과. |
-| `initialize_watermark(true)` | set을 **비움**. (이어지는 `get_new`가 꼬리 창을 신규로 반환 가능) |
-| `get_new_message_lines` | 미초기화면 위 규칙 적용. 이후: 꼬리 창에서 set에 없는 줄만 반환하며 FIFO add. |
-| `reseed_watermark_from_visible` | 꼬리 창 줄을 set에 **union**. 창 밖 fp는 FIFO로만 제거. |
+| `initialize_watermark(false)` | 꼬리 창 fp로 set을 채움. 이후 새로 들어온 줄만 통과 |
+| `initialize_watermark(true)` | set을 비움. 꼬리 창도 신규 가능 |
+| `get_new_message_lines` | 꼬리 창에서 set에 없는 줄만 반환·FIFO add |
+| `reseed_watermark_from_visible` | 꼬리 창을 set에 union |
 
-`PROCESS_EXISTING_ON_START`:
+`PROCESS_EXISTING_ON_START=false`: 기동 시점 꼬리 창은 스킵. `true`: 기동 시 보이는 줄도 처리 (재현 테스트용).
 
-- **`false` (운영 권장):** 기동 시점 **꼬리 창**은 스킵, **그 다음부터** 창에 들어온 줄만 처리. 중지 중 쌓인 줄은 재기동 시에도 그때 창 안이면 패스.  
-- **`true`:** 기동 시 꼬리 창에 있는 줄도 신규로 처리 (파서·재현 테스트용). 잔여 체결분 재전송 위험.
+워터마크는 프로세스 메모리뿐이며 디스크에 저장하지 않는다.
 
-워터마크는 **프로세스 메모리 set**이며 디스크에 저장하지 않는다. SENT/STOPPED로 프로세스가 끝나면 소멸한다.
+### 6.4 세션 fingerprint
 
-### 6.5 세션 fingerprint (두 번째 층)
+`WatcherSession.processed_fingerprints`는 **파싱에 성공한** `watermark_key` SHA1이다.
 
-`WatcherSession.processed_fingerprints`는 파싱에 **성공한** 줄의 `SourceLine.watermark_key` SHA1이다.  
-소스 watermark와 알고리즘은 같으나 역할이 다르다.
+- 소스 watermark: 이 채팅 식별 키를 이미 봤는가  
+- session set: 이 식별 키로 이미 매칭·처리했는가  
 
-- watermark: “이 채팅 **식별 키**를 이미 소스에서 봤는가”  
-- session set: “이 **식별 키**로 이미 매칭·처리했는가”  
-
-MODE 3에서 파서 입력(`Quote.raw_line`)은 호가 조각이고, 세션·QUOTE_FOUND 로그는 `watermark_key`(시각+호가)를 쓴다. 그래서 같은 호가라도 초가 다르면 재기회다.
-
-현재 test-loop에서 SENT 후 reseed해도 session set은 비우지 않으므로, **동일 watermark_key는 같은 프로세스에서 재트리거되지 않는다.**
+MODE 3에서 같은 호가 문구라도 시각이 다르면 키가 달라 재기회다. `SENT_AFTER=loop`여도 session set은 비우지 않는다. `Quote.fingerprint`는 `raw_line` SHA1이며 워처 매칭에는 쓰지 않는다.
 
 ---
 
 ## 7. 호가 파서 (`source/quote_parser.py`)
 
-입력: 소스에서 온 한 줄 + 슬롯의 `instrument`, `yield_prefix`, `required_side`, `required_qty`.
+입력: 한 줄 + `instrument`, `yield_prefix`, `required_side`, `required_qty`.  
+실패는 예외가 아니라 `None` (전송하지 않고 다음 줄).
 
-### 7.1 종목 매칭
+종목은 앞뒤가 숫자/`-`가 아닌 경계에서만 매칭 (`25-11` ≠ `125-11`).
 
-`build_target_pattern`: escape한 종목 문자열이 앞뒤로 숫자/`-`가 아닌 경계에서만 매칭.  
-예: `25-11`은 `125-11`, `25-110`과 매칭되지 않음.
-
-### 7.2 메타 (선택)
-
-`보낸이 (HH:MM[:SS]) : …` 형이면 sender/timestamp를 뽑는다. 종목 검색은 **원문 전체**에서 수행한다.
-
-### 7.3 호가 토큰
-
-종목 직후부터:
+종목 직후:
 
 ```text
 ^\s+(?P<price>\d{2,3})\s*(?P<side>[+-]|사자|팔자)\s*
 ```
 
-- `raw_token` = 가격+side 구간만 (strip). 수량은 `Quote.quantity`에 둔다 (`flip_side_token`이 토큰 끝을 뒤집기 위함).  
-- side 뒤 수량: 없거나 `(` / `*` trailing만이면 **생략 = 100억**. `required_qty == 100`일 때만 통과.  
-- 그 외는 `^\d+\s*억?`만 수량으로 인정 (`80`, `80억`, `100`, `100억`). `억` 정규화 후 숫자가 `required_qty`와 같아야 함.  
-- `required_qty != 100`이면 수량 생략 호가는 거부.  
-- 수량 뒤 trailing: 비거나 `(` / `*`로 시작. `있나요`, 추가 숫자, `ㅎㅈ` 등은 거부.  
-- side 뒤가 숫자로 시작하지 않는 문자열(`있으신가요`)은 거부.
+- 수량 생략 또는 `(` / `*` trailing만 → 100억. `required_qty == 100`일 때만 통과.  
+- 그 외 `^\d+\s*억?`만 인정하고 `required_qty`와 같아야 함.  
+- `있나요`, `ㅎㅈ`, 추가 숫자는 거부.
 
-### 7.4 yield · side
-
-| 자릿수 | 변환 |
-|--------|------|
-| 2 | `prefix + n/100` |
-| 3 | `prefix + n/1000` |
-
-`+`/`사자` → `BUY`, `-`/`팔자` → `SELL`.  
-`required_side`가 BUY/SELL이면 다른 쪽은 `None`.
-
-`Quote.raw_line` = 입력 라인 strip 전체 (소스가 준 문자열 그대로).
+2자리 가격 → `prefix + n/100`, 3자리 → `prefix + n/1000`. `+`/`사자` = BUY, `-`/`팔자` = SELL.
 
 ---
 
-## 8. 트리거와 확정 메시지 (`core/trigger.py`)
+## 8. 트리거와 메시지 (`core/trigger.py`)
 
-### 8.1 `evaluate`
+- BID: `pnl <= threshold`  
+- OFFER: `pnl >= threshold`  
 
-- `BID` (현물 매도): `pnl <= threshold` 이면 트리거. 임계값 부호는 강제하지 않음.  
-- `OFFER` (현물 매수): `pnl >= threshold` 이면 트리거.  
-- 그 외 looking_for → `ValueError`.
-
-### 8.2 `flip_side_token` → `confirm_token`
-
-토큰 끝의 `+`↔`-`, `사자`↔`팔자`.  
-매칭용 side와 별개로, **전송 문장**에만 사용한다 (상대방에게 확정 호가 제시).
-
-### 8.3 `format_message`
-
-`MESSAGE_TEMPLATE.format(...)`. 기본 예: `{instrument} {confirm_token} ㅎㅈ`.  
-`quantity != 100`이면 confirm_token 뒤에 ` {n}억`을 붙인다. 예: `25-10 695- 80억 ㅎㅈ`. 100억(생략·명시)은 기존 문장.
+`flip_side_token`은 전송문에만 쓴다 (`+`↔`-`, `사자`↔`팔자`).  
+`quantity != 100`이면 confirm_token 뒤에 ` {n}억`.
 
 ---
 
 ## 9. 전송 (`send/ui.py`)
 
-1. 전송 프로세스 실행 여부 확인.  
-2. 프로세스 PID + 제목 부분일치 최상위 창 중 점수 최대 선택.  
-3. `activate_window`: 아이콘이면 Restore, 이미 전경이면 Show/sleep 생략. 아니면 Show 후 포그라운드 (Alt / AttachThreadInput). 실패면 `SendError`.  
-4. `send_text`: activate 후 포그라운드를 **다시** 걸지 않음.  
-   - TOPMOST on → 창 사각형 × `(send_input_x, send_input_y)` 클릭  
-   - 포그라운드·커서 하위 창이 대상 앱인지 검증 (아니면 `SendError` — Excel 오입력 방지)  
-   - 클립보드 → Ctrl+V → 짧은 pause → Enter → 짧은 pause  
-   - finally TOPMOST off  
+1. 전송 프로세스·제목 부분일치 창.  
+2. `activate_window`: 아이콘이면 Restore. 이미 전경이면 Show/sleep 생략.  
+3. TOPMOST → 비율 클릭 → 포그라운드·커서 하위 창이 대상 앱인지 확인. `failed to foreground` / `send focus not on target`만 최대 2회 재시도.  
+4. `pyperclip.copy` 후 클립보드가 전송문과 같아야 함. 아니면 `SendError`, Ctrl+V 전 중단(재시도 없음).  
+5. Ctrl+V → Enter. finally TOPMOST off.
 
-진단: `--diagnose-send`로 HWND·제목·비율·클릭 좌표 출력. MODE 1은 분리창을 잡은 뒤 `SEND_INPUT_*_M1`을 그 창에 맞춰 재측정한다.
+`--diagnose-send`로 HWND·제목·클릭 좌표를 본다. MODE 1은 분리창에서 M1 비율을 재측정한다.
 
 ---
 
@@ -373,164 +318,151 @@ MODE 3에서 파서 입력(`Quote.raw_line`)은 호가 조각이고, 세션·QUO
 | 플래그 | 동작 |
 |--------|------|
 | (기본) | `run_watcher` |
-| `--config PATH` | dotenv 경로 (기본 `.env`) |
-| `--diagnose-source` | 소스 diagnose 출력 후 종료 |
-| `--diagnose-send` | 전송 diagnose 출력 후 종료 |
-| `--test-send` | 샘플 Quote로 전송만 |
-| `--test-parser LINE` | Excel 슬롯 기준 파서 시험 |
+| `--config PATH` | dotenv (기본 `.env`) |
+| `--diagnose-source` / `--diagnose-send` | 창·본문 또는 전송 좌표 |
+| `--test-send` | 샘플 Quote 전송 |
+| `--test-parser LINE` | Excel 슬롯 기준 파서 |
+| `--perf-summary` | `logs/sent_perf.csv` mean/median |
 
-설정 로드 실패 exit **2**. 그 외 운영 오류 exit **1**.
+Config 실패 exit **2**. 그 외 운영 오류 exit **1**. Stop은 exit **0**.
 
-### 10.2 시작 시퀀스
+### 10.2 시작
 
-1. PID 파일 기록 · stop 플래그 삭제 (실패면 즉시 ERROR).  
-2. Excel connect → `load_slots`(감시 셀 한 슬롯 + 임계셀) → F2 `WATCHING`, J2 Start Successful.  
-3. 소스 창·전송 창 resolve.  
-4. `initialize_watermark(PROCESS_EXISTING_ON_START)`.  
-5. 폴링 루프.
+PID 파일 기록 · stop 플래그 삭제 → Excel connect → `load_slots` → F2 `WATCHING` → 소스·전송 창 → watermark 초기화 → 폴링.
 
-소스/전송 창을 못 찾거나 읽기/전송/Excel 오류 시 즉시 F2 `ERROR`, J2 `(HH:MM:SS) Error: …` (폴링 재시도·폴백 없음). Config 로드 실패는 `.env`의 workbook/status/J2로 Excel ERROR 시도 후 exit 2.
-
-### 10.3 폴링 한 사이클
+### 10.3 한 사이클
 
 ```text
-stop flag? → STOPPED, return 0
-lines = get_new_message_lines(...)
-if lines: load_slots again (watch cell row + threshold cell)
-for line in lines:
-    parse_quote_line against the single loaded slot
-    session fingerprint 중복이면 skip
-    QUOTE_FOUND 로그 (raw_token + raw_line)
-    write_yield_read_pnl (D{row} / F{row+offset}; wait xlDone + numeric PnL)
-    if |pnl-threshold| > SANITY_BAND → ERROR
-    evaluate vs threshold cell
-    if not triggered:
-        H2/I2/J2 Quote Skipped, WATCHING, continue
-    format_message → send_text
-    SENT 상태 기록
-    → (현재 구현) reseed_watermark_from_visible → WATCHING → continue
+stop? → STOPPED, return 0
+lines = get_new_message_lines
+없으면 sleep
+있으면 load_slots, LINE 로그, collect_batch_matches
+  0건 → sleep
+  2건+ → ERROR ambiguous quotes in one poll
+  1건 → yield/PnL → load_slots 재확인
+        종목·looking_for·qty·threshold 변경 → ERROR
+        sanity band 초과 → ERROR
+        evaluate skip → Quote Skipped
+        trigger → send_text → SENT → SENT_AFTER
 sleep(POLL_INTERVAL_MS)
 ```
 
-### 10.4 SENT 이후 동작 (현재 코드)
+### 10.4 `SENT_AFTER`
 
-**Test-loop (활성):**
+| 값 | 동작 |
+|----|------|
+| `exit` | SENT 기록 후 exit 0 |
+| `loop` | `reseed_watermark_from_visible` 후 WATCHING 유지 |
 
-1. Excel에 `SENT` 및 last_quote / pnl / Message Sent 기록.  
-2. `reseed_watermark_from_visible()` — 지금 화면 전체를 “이미 본 줄”로 표시 → **이후 새로 올라온 줄만** 다시 탐지.  
-3. F2를 `WATCHING`으로 되돌리고 루프 계속.
+### 10.5 SENT 지연 로그
 
-**One-shot (코드에 주석으로 존재):**
+확정(`send_text` 성공)마다 [`logs/sent_perf.csv`](../logs/sent_perf.csv)에 한 줄 append. Quote Skipped·ERROR는 기록하지 않는다.
 
-- `log.info("EXIT"); return 0`  
-- 주석을 해제하고 test-loop 블록을 비활성화하면 전송 후 프로세스 종료.
+`total_ms`는 **호가를 매칭한 직후부터 확정 메시지를 다 보내기까지** (Excel PnL 대기 + 클릭·붙여넣기·Enter). 채팅 게시 시각은 초 단위라 시작점으로 쓰지 않는다. 폴링으로 줄을 보기 전 지연은 포함하지 않는다.
 
-유지보수 시 **어느 쪽이 활성인지 `main.py` SENT 직후를 확인**할 것.
+| 열 | 의미 |
+|----|------|
+| `ts` | 전송 완료 ISO |
+| `total_ms` | 매칭 → `send_text` return |
+| `excel_ms` | `write_yield_read_pnl` |
+| `send_ms` | `send_text` |
+| `mode` | 1 / 2 / 3 |
+| `looking_for` | G2 라벨 |
+| `raw_line` | MODE 1·2 `text`, MODE 3 `watermark_key` |
+| `sent_message` | 실제로 보낸 확정 문장 |
 
-### 10.5 매칭 순서
-
-`_match_quote`는 `EXCEL_WATCH_CELL`이 선택한 **슬롯 하나**만 파서에 넘긴다. 다른 `EXCEL_SLOT_ROWS` 종목은 같은 줄에 있어도 트리거되지 않는다.
+기록 실패는 전송을 되돌리지 않는다. 통계: `python main.py --config .env --perf-summary`.
 
 ---
 
 ## 11. VBA (`vba/KBondWatcher.bas`)
 
-| 상수 | 의미 |
-|------|------|
-| `PROJECT_DIR` / `MAIN_PATH` / `CONFIG_PATH` | 설치 경로 (배포 PC에 맞게 수정) |
-| `PYTHONW_PATH` | `pythonw.exe` — **venv의 pythonw 절대경로 권장** |
-| `STOP_FLAG_PATH` | `.env`의 `STOP_FLAG_PATH`와 **반드시 동일** |
-| `PID_PATH` | stop 경로와 같은 폴더의 `kbond_watcher.pid` (Python이 PID 기록) |
+상수의 `PROJECT_DIR` / `PYTHONW_PATH` / `STOP_FLAG_PATH`를 설치 PC에 맞게 수정한다. STOP 경로는 `.env`와 같아야 한다. F2~J2 주소는 `.env` `EXCEL_*_CELL`과 같아야 한다.
 
 | Sub | 동작 |
 |-----|------|
-| `StartKBondWatcher` | 기존 워처 프로세스 종료 → stop 플래그 삭제 → F2~J2 클리어 → `pythonw main.py --config .env` 숨김 실행 |
-| `StopKBondWatcher` | stop 플래그 생성 → PID/`main.py` 프로세스 `taskkill` → F2=`STOPPED`, J2=`(HH:MM:SS) Stopped` |
-| Fail | F2=`ERROR`, J2=`(HH:nn:ss) Error: {Err.Description}` |
+| `StartKBondWatcher` | 기존 워처 종료 → 플래그 삭제 → F2~J2 클리어 → `pythonw main.py --config .env` |
+| `StopKBondWatcher` | stop 플래그 → taskkill → F2 `STOPPED` |
+| Fail | F2 `ERROR`, J2 `(HH:nn:ss) Error: …` |
 
-`KillWatcher`는 이미 종료된 PID(`taskkill` 128)는 정상, 그 외는 Fail. 남은 `main.py` 정리는 **python/pythonw만** 대상으로 한다 (PowerShell 자기 명령줄에 경로가 들어 있어 전체를 매칭하면 자살을 하고 `Run`이 -1을 반환한다). Python은 COM busy를 같은 호출만 재시도하고, 계산 대기·라인 처리 중에도 stop 플래그를 본다.
-
-VBA 셀 주소 상수(F2~J2)는 `.env`의 `EXCEL_*_CELL`과 일치해야 한다.
+`KillWatcher`는 PID `taskkill`(0·128 정상) 후 **python/pythonw**의 `main.py`만 PowerShell로 정리한다.
 
 ---
 
 ## 12. 로깅
 
-- 로거 이름: `kbond_watcher`  
-- RotatingFileHandler (2MB × 5) + 콘솔  
-- 포맷: `%(asctime)s %(levelname)s %(message)s`  
-- 운영 경로에 warning/폴백 없음. 예외는 즉시 ERROR.
+로거 `kbond_watcher`. RotatingFileHandler 2MB × 5 + 콘솔.  
+`%(asctime)s %(levelname)s %(message)s`. 운영 경로에 warning/폴백 없음.
 
-주요 키워드: `WATCHING`, `QUOTE_FOUND`, `NO_TRIGGER`, `TRIGGERED`, `SENT`, `STOPPED`, `ERROR`, `EXIT`(one-shot 시), `EXCEL_*`, `MESSAGE_SENT`, `source watermark`, `source watermark reseed`.
-
-`QUOTE_FOUND`는 `raw_token`과 소스 식별 키(`watermark_key`)를 함께 남긴다. H2는 `{instrument} {raw_token}`만 사용한다.
+| 키워드 | 때 |
+|--------|-----|
+| `WATCHING` | 기동·스킵 후 복귀 |
+| `LINE` | watermark를 통과한 신규 줄 (`mode`/`looking_for`/`threshold` 정수/`raw_line`). 폴당 최대 20, 160자 truncate. MODE 3는 `watermark_key` |
+| `LINE_OMITTED` | 20줄 초과분 |
+| `QUOTE_FOUND` | 파싱 성공 1건 |
+| `NO_TRIGGER` / `TRIGGERED` / `SENT` / `STOPPED` / `ERROR` / `EXIT` | 상태 |
+| `EXCEL_CONNECTED` / `EXCEL_WRITE` / `PNL` | COM |
+| `SLOTS_LOADED` | DEBUG |
+| `MESSAGE_SENT` | 전송 완료 |
+| `source watermark` / `reseed` | 게이트 |
 
 ---
 
-## 13. 진단·테스트
+## 13. 테스트
 
 ```bat
-cd <프로젝트>
-.venv\Scripts\activate
-python main.py --config .env --diagnose-source
-python main.py --config .env --diagnose-send
-python main.py --config .env --test-parser "25-10 23+"
-python main.py --config .env --test-send
 pytest -q
 ```
 
-| 테스트 영역 | 파일 |
-|-------------|------|
-| MODE·클릭 비율 로드 | `tests/test_config_mode.py` |
-| 파서 accept/reject | `tests/test_quote_parser.py` |
-| Looking For·sanity band | `tests/test_trigger.py` |
-| Excel 헬퍼 (CVErr 대기 포함) | `tests/test_excel_*.py` 등 |
-| RichEdit 캡·전송 pause | `tests/test_richedit_reader.py`, `tests/test_send_ui.py` |
+| 파일 | 범위 |
+|------|------|
+| `tests/test_config_mode.py` | MODE, 클릭 비율, `SENT_AFTER` |
+| `tests/test_quote_parser.py` | 파서 accept/reject |
+| `tests/test_trigger.py` | BID/OFFER, sanity band |
+| `tests/test_excel_bridge.py` | 감시 셀, CVErr, busy |
+| `tests/test_richedit_reader.py` | 캡, 창 제목 선택, 핸들 유효 |
+| `tests/test_send_ui.py` | 클릭 좌표, 클립보드 |
+| `tests/test_watcher_guards.py` | 배치 매칭, LINE 로그 |
+| `tests/test_perf_log.py` | SENT CSV append, mean/median |
+| `tests/test_uia_time.py` | 시각 토큰, UIA 창 캐시 |
+| `tests/test_watermark.py` | 2000줄 창, 신규 게이트 |
 
 ---
 
-## 14. 운영·유지보수 체크리스트
+## 14. 운영 체크
 
-1. `.env`의 `MODE`, `KBOND_CHAT_TITLE`(1·2), `EXCEL_WORKBOOK`, `PROCESS_EXISTING_ON_START`, 클릭 비율, `STOP_FLAG_PATH` 확인.  
-2. VBA 경로·`pythonw`·STOP 경로를 설치 PC에 맞게 수정.  
-3. KBond/FORESTBOND·전송 대상·Excel을 연 뒤 diagnose. MODE 1은 분리창 제목과 M1 클릭 점이 입력란인지 확인.  
-4. `EXCEL_WATCH_CELL`이 허용 목록의 한 종목을 가리키고, 그 행 E열이 0이 아닌 정수인지(부호=방향, 절댓값=억 수량), `EXCEL_PNL_THRESHOLD_CELL`이 숫자인지 확인.  
-5. SENT 후 동작이 test-loop인지 one-shot인지 `main.py` 확인.  
-6. MODE 3 QUOTE_FOUND의 `raw_line=`은 `(시각) : 호가` 키. 파서 입력은 호가 조각.  
-7. 동일 `watermark_key`는 세션 내 재처리되지 않음. 호가 문구만 같고 시각이 다르면 MODE 3에서 재기회.  
-8. 감시 중 채팅을 위로 스크롤하면(특히 UIA) 예상 밖 줄이 신규로 보이거나 최신을 놓칠 수 있음 — 맨 아래 유지 권장.  
-9. MODE 1·2는 `KBOND_CHAT_TITLE`과 제목이 맞는 채팅 **분리창** `TJvRichEdit`가 필요하다.
-
-### 일반적인 장애
+1. `.env`의 `MODE`, `KBOND_CHAT_TITLE`(1·2), `SENT_AFTER`, `EXCEL_WORKBOOK`, `STOP_FLAG_PATH`.  
+2. VBA 경로·`pythonw`를 이 PC에 맞게.  
+3. 소스·전송·Excel을 연 뒤 `--diagnose-source` / `--diagnose-send`.  
+4. D2가 허용 행 한 종목, 그 행 E열이 0이 아닌 정수, E2가 숫자.  
+5. MODE 1·2는 제목이 맞는 **분리창**이 살아 있어야 한다. 닫거나 메인에 붙이면 ERROR.  
+6. MODE 3는 채팅을 맨 아래에 둔다. 시간 토큰 없는 호가 줄은 매칭하지 않는다.
 
 | 증상 | 점검 |
 |------|------|
-| 시작 즉시 ERROR | 소스/전송 창, Excel 미실행, 설정 키 누락, J2 `Error:` |
-| WATCHING인데 무반응 | Looking For·qty, `PROCESS_EXISTING=false`로 기존 화면만 있음, diagnose-source |
-| PnL만 되고 전송 없음 | I2 vs 임계값·Looking For 방향 |
-| I2가 −2146826273 | `#VALUE!` — 수식이 숫자로 안 끝난 채 타임아웃 |
-| 전송이 Excel로 감 | diagnose-send 좌표, TOPMOST/포커스, 클릭 비율 |
-| MODE 1·2 소스 없음 | 분리창 제목이 `KBOND_CHAT_TITLE`과 맞는지, `TJvRichEdit` |
+| 시작 즉시 ERROR | 창, Excel, 설정 키, J2 `Error:` |
+| WATCHING인데 무반응 | qty/side, `PROCESS_EXISTING_ON_START=false`, diagnose-source |
+| PnL만 되고 전송 없음 | I2 vs 임계, Looking For |
+| I2가 −2146826273 | `#VALUE!` 타임아웃 |
+| 전송이 Excel로 감 | diagnose-send, 포커스, 클릭 비율 |
+| MODE 1·2 소스 없음 | 분리창 제목, `TJvRichEdit` |
 
 ---
 
-## 15. 모듈 책임 한눈에
+## 15. 데이터 객체
 
 ```text
-config.loader     → Config (불변)
-source.*          → list[str] 신규 라인
+config.loader     → Config
+source.*          → list[SourceLine]
 quote_parser      → Optional[Quote]
-excel.bridge      → slots, pnl, status cells
+excel.bridge      → InstrumentSlot, pnl, status
 core.trigger      → TriggerResult, outbound text
-send.ui           → UI paste+Enter
-main              → 위 조립 + 세션 fingerprint + stop
+send.ui           → paste + Enter
+main              → 배치 매칭 + session fingerprint + stop
 ```
 
-데이터 객체:
-
-- `Quote` — instrument, raw_line, raw_token, yield_value, side, optional sender/ts, fingerprint  
+- `SourceLine` — `text`, `watermark_key`  
+- `Quote` — instrument, raw_line, raw_token, yield_value, side, quantity, sender/ts  
 - `InstrumentSlot` — row, looking_for, required_side, qty_abs, yield_prefix, cells  
 - `TriggerResult` — triggered, reason, pnl, quote  
 - `WatcherSession` — processed_fingerprints, status  
-
-이 명세와 코드가 어긋나면 **코드를 진실로** 삼고 문서를 갱신한다.

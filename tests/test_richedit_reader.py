@@ -128,6 +128,29 @@ def test_pack_textrange_32_and_64() -> None:
     assert len(packed64) == 16
 
 
+def test_chat_valid_keeps_live_hwnd_when_hidden(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    reader = KbondSourceReader("[채권] 블커본드", "KBondMessenger.exe")
+    reader._edit_hwnd = 1
+    reader._hwnd = 2
+    monkeypatch.setattr("source.reader_kbond.win32gui.IsWindow", lambda hwnd: True)
+    monkeypatch.setattr(
+        "source.reader_kbond.win32gui.IsWindowVisible", lambda hwnd: False
+    )
+    assert reader._chat_valid() is True
+
+
+def test_chat_valid_false_when_hwnd_destroyed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    reader = KbondSourceReader("[채권] 블커본드", "KBondMessenger.exe")
+    reader._edit_hwnd = 1
+    reader._hwnd = 2
+    monkeypatch.setattr("source.reader_kbond.win32gui.IsWindow", lambda hwnd: False)
+    assert reader._chat_valid() is False
+
+
 def test_select_chat_by_title_picks_matching_room() -> None:
     other = EditCandidate(
         1, 10, "[채권] 다른방", "TfrmDetach", 0, 0, 800, 700, True

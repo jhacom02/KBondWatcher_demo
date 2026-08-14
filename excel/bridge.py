@@ -486,8 +486,8 @@ class ExcelBridge:
             qty_cell=qty_cell,
             pnl_cell=pnl_cell,
         )
-        logger.info(
-            "SLOTS_LOADED | count=1 looking_for=%s row=%s instrument=%s "
+        logger.debug(
+            "SLOTS_LOADED | looking_for=%s row=%s instrument=%s "
             "qty=%s threshold=%s prefixes=3Y:%s 10Y:%s",
             looking_for,
             row,

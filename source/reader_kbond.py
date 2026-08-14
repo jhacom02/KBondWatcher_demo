@@ -60,7 +60,8 @@ class KbondSourceReader(BaseSourceReader):
         return bool(
             self._edit_hwnd
             and win32gui.IsWindow(self._edit_hwnd)
-            and win32gui.IsWindowVisible(self._edit_hwnd)
+            and self._hwnd
+            and win32gui.IsWindow(self._hwnd)
         )
 
     def _ensure_chat(self) -> None:

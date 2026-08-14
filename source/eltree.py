@@ -6,9 +6,20 @@ from ctypes import wintypes
 from dataclasses import dataclass
 from typing import Optional
 
-import psutil
 import win32gui
 import win32process
+
+from .win32mem import (
+    MEM_COMMIT,
+    MEM_RELEASE,
+    MEM_RESERVE,
+    PAGE_READWRITE,
+    PROCESS_ACCESS,
+    kernel32,
+    normalize_lines,
+    process_is_32bit,
+    process_pids,
+)
 
 TREE_CLASS = "TElTree"
 CHAT_MIN_CENTER_X_RATIO = 0.55
@@ -27,63 +38,7 @@ TVIF_TEXT = 0x0001
 TEXT_BUFFER_CHARS = 512
 MAX_ITEMS = 5000
 
-PROCESS_VM_OPERATION = 0x0008
-PROCESS_VM_READ = 0x0010
-PROCESS_VM_WRITE = 0x0020
-PROCESS_QUERY_INFORMATION = 0x0400
-PROCESS_ACCESS = (
-    PROCESS_VM_OPERATION
-    | PROCESS_VM_READ
-    | PROCESS_VM_WRITE
-    | PROCESS_QUERY_INFORMATION
-)
-
-MEM_COMMIT = 0x1000
-MEM_RESERVE = 0x2000
-MEM_RELEASE = 0x8000
-PAGE_READWRITE = 0x04
-
-kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
 user32 = ctypes.WinDLL("user32", use_last_error=True)
-
-kernel32.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
-kernel32.OpenProcess.restype = wintypes.HANDLE
-kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
-kernel32.CloseHandle.restype = wintypes.BOOL
-kernel32.VirtualAllocEx.argtypes = [
-    wintypes.HANDLE,
-    wintypes.LPVOID,
-    ctypes.c_size_t,
-    wintypes.DWORD,
-    wintypes.DWORD,
-]
-kernel32.VirtualAllocEx.restype = wintypes.LPVOID
-kernel32.VirtualFreeEx.argtypes = [
-    wintypes.HANDLE,
-    wintypes.LPVOID,
-    ctypes.c_size_t,
-    wintypes.DWORD,
-]
-kernel32.VirtualFreeEx.restype = wintypes.BOOL
-kernel32.WriteProcessMemory.argtypes = [
-    wintypes.HANDLE,
-    wintypes.LPVOID,
-    wintypes.LPCVOID,
-    ctypes.c_size_t,
-    ctypes.POINTER(ctypes.c_size_t),
-]
-kernel32.WriteProcessMemory.restype = wintypes.BOOL
-kernel32.ReadProcessMemory.argtypes = [
-    wintypes.HANDLE,
-    wintypes.LPCVOID,
-    wintypes.LPVOID,
-    ctypes.c_size_t,
-    ctypes.POINTER(ctypes.c_size_t),
-]
-kernel32.ReadProcessMemory.restype = wintypes.BOOL
-kernel32.IsWow64Process.argtypes = [wintypes.HANDLE, ctypes.POINTER(wintypes.BOOL)]
-kernel32.IsWow64Process.restype = wintypes.BOOL
-
 user32.SendMessageW.argtypes = [
     wintypes.HWND,
     wintypes.UINT,
@@ -117,19 +72,6 @@ class TreeCandidate:
         return (center - parent_left) / width
 
 
-def normalize_lines(chunks: list[str]) -> list[str]:
-    lines: list[str] = []
-    seen: set[str] = set()
-    for chunk in chunks:
-        for line in str(chunk).splitlines():
-            cleaned = line.strip()
-            if not cleaned or cleaned in seen:
-                continue
-            seen.add(cleaned)
-            lines.append(cleaned)
-    return lines
-
-
 def pick_chat_tree(
     candidates: list[TreeCandidate],
     parent_left: int,
@@ -144,18 +86,6 @@ def pick_chat_tree(
     if not eligible:
         return None
     return max(eligible, key=lambda c: c.area)
-
-
-def process_pids(process_name: str) -> set[int]:
-    expected = process_name.lower()
-    pids: set[int] = set()
-    for proc in psutil.process_iter(["name", "pid"]):
-        try:
-            if (proc.info.get("name") or "").lower() == expected:
-                pids.add(int(proc.info["pid"]))
-        except (psutil.NoSuchProcess, psutil.AccessDenied):
-            continue
-    return pids
 
 
 def _rank_window(hwnd: int) -> int:
@@ -240,15 +170,6 @@ def find_chat_eltree(parent_hwnd: int) -> int:
             f"(candidates={len(candidates)})"
         )
     return chosen.hwnd
-
-
-def _process_is_32bit(process: wintypes.HANDLE) -> bool:
-    if ctypes.sizeof(ctypes.c_void_p) == 4:
-        return True
-    wow64 = wintypes.BOOL()
-    if not kernel32.IsWow64Process(process, ctypes.byref(wow64)):
-        raise ElTreeReaderError("IsWow64Process failed")
-    return bool(wow64.value)
 
 
 def _pack_tvitem_text(
@@ -392,7 +313,7 @@ def read_eltree_lines(tree_hwnd: int) -> list[str]:
     if not process:
         raise ElTreeReaderError(f"OpenProcess failed for pid={pid}")
     try:
-        is_32bit = _process_is_32bit(process)
+        is_32bit = process_is_32bit(process)
         count = _send(tree_hwnd, TVM_GETCOUNT, 0, 0)
         handles = _iter_item_handles(tree_hwnd)
         if count <= 0 and not handles:

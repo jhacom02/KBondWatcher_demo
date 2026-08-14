@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import re
+import time
 from typing import Optional
 
+import win32gui
 from pywinauto import Desktop
 from pywinauto.base_wrapper import BaseWrapper
 
@@ -11,6 +13,14 @@ from .common import BaseSourceReader, SourceLine, SourceReaderError, source_line
 _TIME_LINE = re.compile(
     r"^(?:(?P<sender>.+?)\s+)?\((?P<ts>\d{1,2}:\d{2}(?::\d{2})?)\)\s*[:：]?\s*$"
 )
+_CLOCK_TOKEN = re.compile(r"\(\d{1,2}:\d{2}")
+
+UIA_TEXT_ENUM_MAX_RETRIES = 2
+UIA_TEXT_ENUM_RETRY_DELAY_SECONDS = 0.05
+
+
+def watermark_has_clock(key: str) -> bool:
+    return _CLOCK_TOKEN.search(key) is not None
 
 
 def attach_preceding_time(seq: list[str]) -> list[SourceLine]:
@@ -39,6 +49,7 @@ class UiaSourceReader(BaseSourceReader):
         self.source_window_title = source_window_title
         if not self.source_window_title.strip():
             raise SourceReaderError("source_window_title is required")
+        self._window: Optional[BaseWrapper] = None
 
     def find_source_window(self) -> BaseWrapper:
         desktop = Desktop(backend="uia")
@@ -74,23 +85,48 @@ class UiaSourceReader(BaseSourceReader):
                 ) from exc
 
         matches.sort(key=_area, reverse=True)
-        return matches[0]
+        self._window = matches[0]
+        return self._window
+
+    def _window_valid(self) -> bool:
+        win = self._window
+        if win is None:
+            return False
+        try:
+            hwnd = int(win.handle)
+        except Exception:
+            return False
+        return bool(hwnd and win32gui.IsWindow(hwnd) and win32gui.IsWindowVisible(hwnd))
+
+    def _ensure_window(self) -> BaseWrapper:
+        if self._window_valid() and self._window is not None:
+            return self._window
+        return self.find_source_window()
 
     def _collect_text_controls(self, window: BaseWrapper) -> list[BaseWrapper]:
-        try:
-            texts = window.descendants(control_type="Text")
-        except Exception as exc:
-            raise SourceReaderError(
-                f"Failed to enumerate Text controls: {exc}"
-            ) from exc
-        if not texts:
-            raise SourceReaderError("no UIA Text controls")
-        return texts
+        last_exc: Optional[BaseException] = None
+        for attempt in range(UIA_TEXT_ENUM_MAX_RETRIES + 1):
+            try:
+                texts = window.descendants(control_type="Text")
+            except Exception as exc:
+                last_exc = exc
+                if attempt < UIA_TEXT_ENUM_MAX_RETRIES:
+                    time.sleep(UIA_TEXT_ENUM_RETRY_DELAY_SECONDS)
+                    continue
+                raise SourceReaderError(
+                    f"Failed to enumerate Text controls: {exc}"
+                ) from exc
+            if not texts:
+                raise SourceReaderError("no UIA Text controls")
+            return texts
+        raise SourceReaderError(
+            f"Failed to enumerate Text controls: {last_exc}"
+        )
 
     def get_visible_message_lines(
         self, window: Optional[BaseWrapper] = None
     ) -> list[SourceLine]:
-        win = window or self.find_source_window()
+        win = window or self._ensure_window()
         controls = self._collect_text_controls(win)
         raw_lines: list[str] = []
         for ctrl in controls:

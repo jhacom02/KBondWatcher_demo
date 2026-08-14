@@ -22,6 +22,7 @@ def _write_env(path: Path, mode: str, extra: str = "") -> Path:
                 f"MODE={mode}",
                 "POLL_INTERVAL_MS=300",
                 "PROCESS_EXISTING_ON_START=true",
+                "SENT_AFTER=exit",
                 "EXCEL_WORKBOOK=sample.xlsm",
                 "EXCEL_SHEET=트레이딩",
                 "EXCEL_SLOT_ROWS=19,25,41,46,56",
@@ -211,5 +212,25 @@ def test_sanity_band_must_be_positive(tmp_path: Path) -> None:
                 tmp_path / "bad_band.env",
                 "2",
                 extra="EXCEL_PNL_SANITY_BAND=0\n",
+            )
+        )
+
+
+def test_sent_after_exit_and_loop(tmp_path: Path) -> None:
+    assert Config.load(_write_env(tmp_path / "sa_exit.env", "2")).sent_after == "exit"
+    cfg = Config.load(
+        _write_env(tmp_path / "sa_loop.env", "2", extra="SENT_AFTER=loop\n")
+    )
+    assert cfg.sent_after == "loop"
+
+
+@pytest.mark.parametrize("bad", ["", "once"])
+def test_sent_after_rejected(tmp_path: Path, bad: str) -> None:
+    with pytest.raises(ConfigError, match="SENT_AFTER"):
+        Config.load(
+            _write_env(
+                tmp_path / f"sa_bad_{bad or 'empty'}.env",
+                "2",
+                extra=f"SENT_AFTER={bad}\n",
             )
         )

@@ -4,7 +4,6 @@ import logging
 import time
 from typing import Callable, Optional
 
-import psutil
 import pyautogui
 import pyperclip
 import win32api
@@ -13,6 +12,7 @@ import win32gui
 import win32process
 
 from config import Config
+from source.win32mem import process_pids
 
 logger = logging.getLogger("kbond_watcher")
 
@@ -32,20 +32,8 @@ def relative_point(
     return left + int(width * ratio_x), top + int(height * ratio_y)
 
 
-def _process_pids(process_name: str) -> list[int]:
-    expected = process_name.lower()
-    pids: list[int] = []
-    for proc in psutil.process_iter(["name", "pid"]):
-        try:
-            if (proc.info.get("name") or "").lower() == expected:
-                pids.append(int(proc.info["pid"]))
-        except (psutil.NoSuchProcess, psutil.AccessDenied):
-            continue
-    return pids
-
-
 def _is_process_running(process_name: str) -> bool:
-    return bool(_process_pids(process_name))
+    return bool(process_pids(process_name))
 
 
 def _rank_window(hwnd: int) -> int:
@@ -88,7 +76,7 @@ def _is_target_window(hwnd: int, cfg: Config, pids: set[int]) -> bool:
 
 
 def find_target_window(cfg: Config) -> Optional[int]:
-    pids = set(_process_pids(cfg.send_process_name))
+    pids = process_pids(cfg.send_process_name)
     if not pids:
         return None
     return _find_best(lambda hwnd: _is_target_window(hwnd, cfg, pids))
@@ -207,37 +195,63 @@ def ensure_target_window(cfg: Config) -> int:
     )
 
 
+SEND_FOCUS_MAX_RETRIES = 2
+
+
+def _is_retryable_send_error(exc: SendError) -> bool:
+    msg = str(exc)
+    return msg.startswith("failed to foreground ") or msg.startswith(
+        "send focus not on target "
+    )
+
+
 def send_text(text: str, cfg: Config) -> None:
     hwnd = ensure_target_window(cfg)
-    activate_window(hwnd, cfg)
-    _set_topmost(hwnd, True)
-    try:
-        _click_ratio(
-            hwnd,
-            cfg.send_input_x,
-            cfg.send_input_y,
-            cfg.send_input_click_pause_seconds,
-        )
-        fg = win32gui.GetForegroundWindow()
-        under = win32gui.WindowFromPoint(win32api.GetCursorPos())
-        if not _same_app(hwnd, fg) or not _same_app(hwnd, under):
-            raise SendError(
-                f"send focus not on target fg={win32gui.GetWindowText(fg)!r} "
-                f"under={win32gui.GetWindowText(under)!r}"
+    attempts = SEND_FOCUS_MAX_RETRIES + 1
+    for attempt in range(attempts):
+        try:
+            activate_window(hwnd, cfg)
+            _set_topmost(hwnd, True)
+            try:
+                _click_ratio(
+                    hwnd,
+                    cfg.send_input_x,
+                    cfg.send_input_y,
+                    cfg.send_input_click_pause_seconds,
+                )
+                fg = win32gui.GetForegroundWindow()
+                under = win32gui.WindowFromPoint(win32api.GetCursorPos())
+                if not _same_app(hwnd, fg) or not _same_app(hwnd, under):
+                    raise SendError(
+                        f"send focus not on target fg={win32gui.GetWindowText(fg)!r} "
+                        f"under={win32gui.GetWindowText(under)!r}"
+                    )
+                pyperclip.copy(text)
+                if pyperclip.paste() != text:
+                    raise SendError("clipboard mismatch after copy")
+                pyautogui.hotkey("ctrl", "v")
+                time.sleep(cfg.send_paste_pause_seconds)
+                pyautogui.press("enter")
+                time.sleep(cfg.send_send_pause_seconds)
+            finally:
+                _set_topmost(hwnd, False)
+            logger.info("MESSAGE_SENT | title=%s", cfg.send_window_title)
+            return
+        except SendError as exc:
+            if (not _is_retryable_send_error(exc)) or attempt >= SEND_FOCUS_MAX_RETRIES:
+                raise
+            logger.info(
+                "SEND_RETRY | attempt=%s/%s | %s",
+                attempt + 1,
+                SEND_FOCUS_MAX_RETRIES,
+                exc,
             )
-        pyperclip.copy(text)
-        pyautogui.hotkey("ctrl", "v")
-        time.sleep(cfg.send_paste_pause_seconds)
-        pyautogui.press("enter")
-        time.sleep(cfg.send_send_pause_seconds)
-    finally:
-        _set_topmost(hwnd, False)
-    logger.info("MESSAGE_SENT | title=%s", cfg.send_window_title)
+            time.sleep(cfg.send_foreground_retry_pause_seconds)
 
 
 def diagnose(cfg: Config) -> str:
     running = _is_process_running(cfg.send_process_name)
-    pids = _process_pids(cfg.send_process_name)
+    pids = process_pids(cfg.send_process_name)
     hwnd = find_target_window(cfg)
     lines = [
         f"process_name={cfg.send_process_name!r}",

@@ -10,7 +10,8 @@ from typing import Optional
 
 from config import Config, ConfigError
 from excel import ExcelBridge, ExcelBridgeError, InstrumentSlot, StopRequested
-from source import SourceReaderError, create_source_reader, format_parser_result, message_fingerprint, parse_quote_line
+from source import SourceLine, SourceReaderError, create_source_reader, format_parser_result, message_fingerprint, parse_quote_line
+from source.reader_uia import watermark_has_clock
 from core import (
     AppStatus,
     Quote,
@@ -21,6 +22,7 @@ from core import (
     pnl_outside_sanity_band,
     setup_logger,
 )
+from core.perf_log import append_sent, sent_perf_path, summarize as summarize_sent_perf
 import send
 from send import SendError
 
@@ -161,6 +163,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument("--diagnose-send", action="store_true")
     parser.add_argument("--test-send", action="store_true")
     parser.add_argument("--test-parser", metavar="LINE")
+    parser.add_argument("--perf-summary", action="store_true")
     return parser
 
 
@@ -196,6 +199,14 @@ def run_diagnose_source(cfg: Config) -> int:
 
 def run_diagnose_send(cfg: Config) -> int:
     print(send.diagnose(cfg))
+    return 0
+
+
+def run_perf_summary(cfg: Config) -> int:
+    text = summarize_sent_perf(sent_perf_path(cfg.log_path))
+    print(text)
+    if text.startswith("no sent perf"):
+        return 1
     return 0
 
 
@@ -253,6 +264,71 @@ def _match_quote(
         if quote is not None:
             return quote, slot
     return None, None
+
+
+def watch_identity(
+    slot: InstrumentSlot, threshold: float
+) -> tuple[str, str, int, float]:
+    return (slot.instrument, slot.looking_for, slot.qty_abs, threshold)
+
+
+def collect_batch_matches(
+    lines: list[SourceLine],
+    slots: list[InstrumentSlot],
+    processed_fps: set[str],
+    *,
+    require_clock: bool = False,
+) -> list[tuple[SourceLine, Quote, InstrumentSlot, str]]:
+    matches: list[tuple[SourceLine, Quote, InstrumentSlot, str]] = []
+    for line in lines:
+        if require_clock and not watermark_has_clock(line.watermark_key):
+            continue
+        quote, slot = _match_quote(line.text, slots)
+        if quote is None or slot is None:
+            continue
+        fp = message_fingerprint(line.watermark_key)
+        if fp in processed_fps:
+            continue
+        matches.append((line, quote, slot, fp))
+    if len(matches) >= 2:
+        raise SourceReaderError(f"ambiguous quotes in one poll: {len(matches)}")
+    return matches
+
+
+LINE_LOG_MAX_CHARS = 160
+LINE_LOG_MAX_PER_POLL = 20
+
+
+def _truncate_log_text(text: str, max_chars: int = LINE_LOG_MAX_CHARS) -> str:
+    value = text or ""
+    if len(value) <= max_chars:
+        return value
+    if max_chars <= 1:
+        return "…"
+    return value[: max_chars - 1] + "…"
+
+
+def log_new_source_lines(
+    log,
+    *,
+    mode: int,
+    looking_for: str,
+    threshold: float,
+    lines: list[SourceLine],
+) -> None:
+    limit = LINE_LOG_MAX_PER_POLL
+    for item in lines[:limit]:
+        raw = item.watermark_key if mode == 3 else item.text
+        log.info(
+            "LINE | mode=%s | looking_for=%s | threshold=%s | raw_line=%s",
+            mode,
+            looking_for,
+            int(threshold),
+            _truncate_log_text(raw),
+        )
+    omitted = len(lines) - limit
+    if omitted > 0:
+        log.info("LINE_OMITTED | +%s", omitted)
 
 
 def run_watcher(cfg: Config) -> int:
@@ -317,91 +393,123 @@ def run_watcher(cfg: Config) -> int:
             )
             if lines:
                 slots, looking_for, threshold = excel.load_slots()
-
-            for line in lines:
                 if stop_requested(cfg.stop_flag_path):
                     _apply_stopped(looking_for)
                     return 0
-                quote, slot = _match_quote(line.text, slots)
-                if quote is None or slot is None:
-                    continue
-                fp = message_fingerprint(line.watermark_key)
-                if fp in session.processed_fingerprints:
-                    continue
-                session.processed_fingerprints.add(fp)
-
-                session.status = AppStatus.QUOTE_FOUND
-                log.info(
-                    "QUOTE_FOUND | %s | raw_token=%s | %.3f | %s | row=%s | raw_line=%s",
-                    quote.instrument,
-                    quote.raw_token,
-                    quote.yield_value,
-                    quote.side,
-                    slot.row,
-                    line.watermark_key,
-                )
-
-                session.status = AppStatus.CALCULATING
-                pnl = excel.write_yield_read_pnl(
-                    slot.input_cell,
-                    slot.pnl_cell,
-                    quote.yield_value,
-                )
-                last_pnl = pnl
-                if threshold is None:
-                    raise ExcelBridgeError("PnL threshold is not loaded")
-                if pnl_outside_sanity_band(
-                    pnl, threshold, cfg.excel_pnl_sanity_band
-                ):
-                    raise ExcelBridgeError(
-                        f"PnL {pnl} outside sanity band "
-                        f"{cfg.excel_pnl_sanity_band} of threshold {threshold}"
-                    )
-                result = evaluate(
-                    quote,
-                    pnl,
-                    threshold,
-                    looking_for=slot.looking_for,
-                )
-
-                if not result.triggered:
-                    session.status = AppStatus.NO_TRIGGER
-                    log.info("NO_TRIGGER | %s", result.reason)
-                    session.status = AppStatus.WATCHING
-                    excel.update_status(
-                        AppStatus.WATCHING,
-                        looking_for=looking_for,
-                        last_quote=f"{quote.instrument} {quote.raw_token}",
-                        last_pnl=pnl,
-                        last_action=format_last_action("Quote Skipped"),
-                    )
-                    log.info("WATCHING")
-                    continue
-
-                session.status = AppStatus.TRIGGERED
-                log.info("TRIGGERED")
-                text = format_message(cfg.message_template, quote, pnl)
-                session.status = AppStatus.SENDING
-                send.send_text(text, cfg)
-
-                session.status = AppStatus.SENT
-                log.info("SENT")
-                excel.update_status(
-                    AppStatus.SENT,
+                log_new_source_lines(
+                    log,
+                    mode=cfg.mode,
                     looking_for=looking_for,
-                    last_quote=f"{quote.instrument} {quote.raw_token}",
-                    last_pnl=pnl,
-                    last_action=format_last_action(f"Message Sent: {text}"),
+                    threshold=threshold,
+                    lines=lines,
                 )
-                # <<<< 2 lines are for one-shot >>>>
-                # log.info("EXIT")
-                # return 0
-                # <<<< test-loop: reseed then keep watching >>>>
-                reader.reseed_watermark_from_visible()
-                session.status = AppStatus.WATCHING
-                excel.update_status(AppStatus.WATCHING, looking_for=looking_for)
-                log.info("WATCHING")
-                continue
+                matches = collect_batch_matches(
+                    lines,
+                    slots,
+                    session.processed_fingerprints,
+                    require_clock=cfg.mode == 3,
+                )
+                if matches:
+                    line, quote, slot, fp = matches[0]
+                    session.processed_fingerprints.add(fp)
+                    t0 = time.perf_counter()
+
+                    session.status = AppStatus.QUOTE_FOUND
+                    log.info(
+                        "QUOTE_FOUND | %s | raw_token=%s | %.3f | %s | row=%s | raw_line=%s",
+                        quote.instrument,
+                        quote.raw_token,
+                        quote.yield_value,
+                        quote.side,
+                        slot.row,
+                        line.watermark_key,
+                    )
+
+                    session.status = AppStatus.CALCULATING
+                    t_excel = time.perf_counter()
+                    pnl = excel.write_yield_read_pnl(
+                        slot.input_cell,
+                        slot.pnl_cell,
+                        quote.yield_value,
+                    )
+                    excel_ms = (time.perf_counter() - t_excel) * 1000.0
+                    last_pnl = pnl
+                    if threshold is None:
+                        raise ExcelBridgeError("PnL threshold is not loaded")
+                    slots_now, looking_for, threshold_now = excel.load_slots()
+                    before = watch_identity(slot, threshold)
+                    after = watch_identity(slots_now[0], threshold_now)
+                    if before != after:
+                        raise ExcelBridgeError(
+                            f"watch slot changed during PnL ({before} -> {after})"
+                        )
+                    slot = slots_now[0]
+                    threshold = threshold_now
+                    if pnl_outside_sanity_band(
+                        pnl, threshold, cfg.excel_pnl_sanity_band
+                    ):
+                        raise ExcelBridgeError(
+                            f"PnL {pnl} outside sanity band "
+                            f"{cfg.excel_pnl_sanity_band} of threshold {threshold}"
+                        )
+                    result = evaluate(
+                        quote,
+                        pnl,
+                        threshold,
+                        looking_for=slot.looking_for,
+                    )
+
+                    if not result.triggered:
+                        session.status = AppStatus.NO_TRIGGER
+                        log.info("NO_TRIGGER | %s", result.reason)
+                        session.status = AppStatus.WATCHING
+                        excel.update_status(
+                            AppStatus.WATCHING,
+                            looking_for=looking_for,
+                            last_quote=f"{quote.instrument} {quote.raw_token}",
+                            last_pnl=pnl,
+                            last_action=format_last_action("Quote Skipped"),
+                        )
+                        log.info("WATCHING")
+                    else:
+                        session.status = AppStatus.TRIGGERED
+                        log.info("TRIGGERED")
+                        text = format_message(cfg.message_template, quote, pnl)
+                        session.status = AppStatus.SENDING
+                        t_send = time.perf_counter()
+                        send.send_text(text, cfg)
+                        send_ms = (time.perf_counter() - t_send) * 1000.0
+                        total_ms = (time.perf_counter() - t0) * 1000.0
+                        raw_for_log = (
+                            line.watermark_key if cfg.mode == 3 else line.text
+                        )
+                        append_sent(
+                            sent_perf_path(cfg.log_path),
+                            mode=cfg.mode,
+                            looking_for=looking_for or "",
+                            raw_line=raw_for_log,
+                            sent_message=text,
+                            total_ms=total_ms,
+                            excel_ms=excel_ms,
+                            send_ms=send_ms,
+                        )
+
+                        session.status = AppStatus.SENT
+                        log.info("SENT")
+                        excel.update_status(
+                            AppStatus.SENT,
+                            looking_for=looking_for,
+                            last_quote=f"{quote.instrument} {quote.raw_token}",
+                            last_pnl=pnl,
+                            last_action=format_last_action(f"Message Sent: {text}"),
+                        )
+                        if cfg.sent_after == "exit":
+                            log.info("EXIT")
+                            return 0
+                        reader.reseed_watermark_from_visible()
+                        session.status = AppStatus.WATCHING
+                        excel.update_status(AppStatus.WATCHING, looking_for=looking_for)
+                        log.info("WATCHING")
 
             time.sleep(poll_sec)
 
@@ -438,6 +546,8 @@ def main(argv: Optional[list[str]] = None) -> int:
             return run_diagnose_source(cfg)
         if args.diagnose_send:
             return run_diagnose_send(cfg)
+        if args.perf_summary:
+            return run_perf_summary(cfg)
         if args.test_send:
             return run_test_send(cfg)
         if args.test_parser is not None:
