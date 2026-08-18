@@ -5,3 +5,9 @@ pytest
 pyautogui
 pyperclip
 pywinauto
+fastapi
+uvicorn
+jinja2
+itsdangerous
+python-multipart
+cryptography

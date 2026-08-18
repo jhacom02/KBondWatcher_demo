@@ -1,0 +1,121 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8" />
+  <title>KBondWatcher Admin</title>
+  <style>
+    body { font-family: Segoe UI, sans-serif; margin: 24px; }
+    table { border-collapse: collapse; width: 100%; margin-bottom: 24px; }
+    th, td { border: 1px solid #ccc; padding: 6px 8px; font-size: 13px; }
+    th { background: #f0f0f0; }
+    code { font-size: 12px; }
+  </style>
+</head>
+<body>
+  <h1>KBondWatcher Admin</h1>
+  <p>Engine {{ engine_version }}</p>
+  <p>Signing public key: <code>{{ public_key }}</code></p>
+
+  <h2>Traders</h2>
+  <table>
+    <tr>
+      <th>trader_id</th>
+      <th>disabled</th>
+      <th>min_engine</th>
+      <th>profile_version</th>
+      <th>has_signed</th>
+      <th>has_draft</th>
+      <th>updated</th>
+      <th>actions</th>
+    </tr>
+    {% for t in traders %}
+    <tr>
+      <td>{{ t['trader_id'] }}</td>
+      <td>{{ t['disabled'] }}</td>
+      <td>{{ t['min_engine_version'] }}</td>
+      <td>{{ t['profile_version'] }}</td>
+      <td>{{ 'yes' if t['profile_signature'] else 'no' }}</td>
+      <td>{{ 'yes' if t['draft_json'] else 'no' }}</td>
+      <td>{{ t['updated_at'] }}</td>
+      <td>
+        {% if t['draft_json'] %}
+        <form method="post" action="/api/profile/approve/{{ t['trader_id'] }}" onsubmit="return approve(event, this)">
+          <button type="submit">Approve draft</button>
+        </form>
+        {% endif %}
+      </td>
+    </tr>
+    {% endfor %}
+  </table>
+
+  <h2>Devices / Machines</h2>
+  <table>
+    <tr>
+      <th>device_id</th>
+      <th>machine_id</th>
+      <th>trader_id</th>
+      <th>enabled</th>
+      <th>activated</th>
+      <th>cred_protection</th>
+      <th>engine</th>
+      <th>last_seen</th>
+      <th>last_lease</th>
+      <th>last_audit</th>
+      <th>disable</th>
+    </tr>
+    {% for m in machines %}
+    <tr>
+      <td>{{ m['device_id'] }}</td>
+      <td>{{ m['machine_id'] }}</td>
+      <td>{{ m['trader_id'] }}</td>
+      <td>{{ m['enabled'] }}</td>
+      <td>{{ m['activated'] }}</td>
+      <td>{{ m['credential_protection'] }}</td>
+      <td>{{ m['engine_version'] }}</td>
+      <td>{{ m['last_seen'] }}</td>
+      <td>{{ m['last_lease_at'] }}</td>
+      <td>{{ m['last_audit_at'] }}</td>
+      <td>
+        <button type="button" onclick="toggleDevice('{{ m['device_id'] }}', {{ 0 if m['enabled'] else 1 }})">
+          {{ 'Disable' if m['enabled'] else 'Enable' }}
+        </button>
+      </td>
+    </tr>
+    {% endfor %}
+  </table>
+
+  <h2>Audit (latest 100)</h2>
+  <table>
+    <tr><th>timestamp</th><th>event</th><th>trader</th><th>machine</th><th>event_id</th></tr>
+    {% for a in audits %}
+    <tr>
+      <td>{{ a['timestamp'] }}</td>
+      <td>{{ a['event'] }}</td>
+      <td>{{ a['trader_id'] }}</td>
+      <td>{{ a['machine_id'] }}</td>
+      <td>{{ a['event_id'] }}</td>
+    </tr>
+    {% endfor %}
+  </table>
+
+  <script>
+    async function approve(ev, form) {
+      ev.preventDefault();
+      const res = await fetch(form.action, { method: 'POST' });
+      const data = await res.json();
+      alert(res.ok ? ('approved v' + data.profile_version) : JSON.stringify(data));
+      location.reload();
+      return false;
+    }
+    async function toggleDevice(deviceId, enable) {
+      const res = await fetch('/api/devices/' + deviceId + '/disable', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ enabled: !!enable })
+      });
+      alert(res.ok ? 'updated' : 'failed');
+      location.reload();
+    }
+  </script>
+</body>
+</html>

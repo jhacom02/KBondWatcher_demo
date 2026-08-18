@@ -4,3 +4,6 @@ __pycache__/
 .pytest_cache/
 ~$*
 .DS_Store
+dist/
+admin/admin.db
+*.db

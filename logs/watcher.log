@@ -7349,3 +7349,8 @@
 2026-08-18 16:32:48 INFO LINE | mode=3 | looking_for=25-10 / BID | threshold=10000000 | raw_line=27.2.25.하나은행(민.3.295,끝.86)팔자
 2026-08-18 17:38:42 INFO STOPPED
 2026-08-18 17:38:42 INFO EXCEL_CONNECTED | workbook=sample.xlsm sheet=트레이딩
+2026-08-19 08:22:09 INFO EXCEL_CONNECTED | workbook=sample.xlsm sheet=트레이딩
+2026-08-19 08:22:10 INFO EXCEL_CONNECTED | workbook=sample.xlsm sheet=트레이딩
+2026-08-19 08:22:10 INFO WATCHING | mode=3 source=(uia)/FORESTBOND send=notepad.exe/메모장 looking_for=25-10 / BID threshold=10000000.0 slots=[('25-10', 41, 'BUY')]
+2026-08-19 08:22:12 INFO STOPPED
+2026-08-19 08:22:12 INFO EXCEL_CONNECTED | workbook=sample.xlsm sheet=트레이딩

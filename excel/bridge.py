@@ -424,6 +424,7 @@ class ExcelBridge:
         pnl_col: str,
         pnl_row_offset: int,
         calc_wait_timeout_seconds: float = CALC_WAIT_TIMEOUT_SECONDS,
+        write_status_cells: bool = True,
     ) -> None:
         self.workbook_name = (workbook_name or "").strip()
         self.sheet_name = (sheet_name or "").strip()
@@ -445,6 +446,7 @@ class ExcelBridge:
         self.pnl_col = pnl_col.strip().upper()
         self.pnl_row_offset = int(pnl_row_offset)
         self.calc_wait_timeout_seconds = float(calc_wait_timeout_seconds)
+        self.write_status_cells = bool(write_status_cells)
         self._pythoncom: Any = None
         self._app: Any = None
         self._wb: Any = None
@@ -750,6 +752,10 @@ class ExcelBridge:
         *,
         ignore_error: bool = False,
     ) -> None:
+        if not self.write_status_cells:
+            return
+        if not (self.status_cell or "").strip():
+            return
         try:
             self._ensure()
 

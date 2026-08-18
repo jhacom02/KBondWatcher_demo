@@ -158,6 +158,9 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument("--test-send", action="store_true")
     parser.add_argument("--test-parser", metavar="LINE")
     parser.add_argument("--perf-summary", action="store_true")
+    parser.add_argument("--run-profile", action="store_true")
+    parser.add_argument("--serve", action="store_true")
+    parser.add_argument("--serve-admin", action="store_true")
     return parser
 
 
@@ -607,6 +610,20 @@ def run_watcher(cfg: Config) -> int:
 
 def main(argv: Optional[list[str]] = None) -> int:
     args = build_arg_parser().parse_args(argv)
+
+    if args.serve:
+        from app.web.server import run_local_web
+
+        return run_local_web()
+    if args.serve_admin:
+        from admin.server import run_admin
+
+        return run_admin()
+    if args.run_profile:
+        from app.watcher_profile import run_watcher_from_profile
+
+        return run_watcher_from_profile()
+
     try:
         cfg = Config.load(args.config)
     except ConfigError as exc:
