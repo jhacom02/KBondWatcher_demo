@@ -2895,3 +2895,13 @@ AttributeError: Range.Value. Did you mean: 'Value2'?
 2026-08-14 17:02:36 ERROR ERROR | window containing title 'FORESTBOND' not found
 2026-08-14 17:03:00 ERROR ERROR | Failed to connect to running Excel.Application
 2026-08-14 17:03:18 ERROR ERROR | notepad.exe is not running
+2026-08-18 13:19:30 ERROR ERROR | Workbook 'C:\mycode\KBondWatcher\data\sample.xlsm' is not open in Excel
+2026-08-18 13:19:30 ERROR Excel status update failed: Workbook 'C:\mycode\KBondWatcher\data\sample.xlsm' is not open in Excel
+2026-08-18 13:19:49 ERROR ERROR | Workbook 'C:\mycode\KBondWatcher\data\sample.xlsm' is not open in Excel
+2026-08-18 13:19:49 ERROR Excel status update failed: Workbook 'C:\mycode\KBondWatcher\data\sample.xlsm' is not open in Excel
+2026-08-18 13:20:23 ERROR ERROR | Workbook 'C:\mycode\KBondWatcher\data\sample.xlsm' is not open in Excel
+2026-08-18 13:20:23 ERROR Excel status update failed: Workbook 'C:\mycode\KBondWatcher\data\sample.xlsm' is not open in Excel
+2026-08-18 13:21:45 ERROR ERROR | Workbook 'C:\mycode\KBondWatcher\data\sample.xlsm' is not open in Excel
+2026-08-18 13:21:45 ERROR Excel status update failed: Workbook 'C:\mycode\KBondWatcher\data\sample.xlsm' is not open in Excel
+2026-08-18 13:24:04 ERROR ERROR | Workbook 'C:\mycode\KBondWatcher\data\sample.xlsm' is not open in Excel
+2026-08-18 13:24:04 ERROR Excel status update failed: Workbook 'C:\mycode\KBondWatcher\data\sample.xlsm' is not open in Excel

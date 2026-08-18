@@ -9,8 +9,8 @@ if str(ROOT) not in sys.path:
 
 import pytest
 
-from source.eltree import normalize_lines
 from source.reader_kbond import KbondSourceReader
+from source.win32mem import normalize_lines
 from source.richedit import (
     MAX_TEXT_CHARS,
     EditCandidate,
