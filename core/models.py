@@ -19,6 +19,7 @@ class AppStatus(str, Enum):
     SENT = "SENT"
     DONE = "DONE"
     STOPPED = "STOPPED"
+    EXCEL_WAIT = "EXCEL_WAIT"
     ERROR = "ERROR"
 
 

@@ -23,8 +23,8 @@
 
 | 조건 | 메시지 | 의미 |
 |------|--------|------|
-| Excel 미실행·COM 없음 | `pywin32 is required` / `Failed to connect to running Excel.Application` | Excel이 꺼져 있거나 pywin32 미설치 |
-| 워크북 못 찾음 | `Workbook '{name}' is not open` / `Failed to read FullName…` / `No ActiveWorkbook` | `EXCEL_WORKBOOK`과 열린 파일이 안 맞거나 FullName COM 실패 |
+| Excel 미실행·COM 없음 | `pywin32 is required` / `Failed to connect to running Excel.Application: {exc}` | pywin32 미설치이거나 GetObject/ROT가 아닌 이유로 COM 연결 실패. 워크북이 닫힌 경우는 아래 EXCEL_WAIT |
+| 워크북 FullName 읽기 실패 | `Failed to read FullName for workbook {name}` | 열린 객체의 FullName COM 실패. 종료 |
 | 시트 없음 | `Worksheet '{sheet}' not found` / `No ActiveSheet available` | `EXCEL_SHEET` 이름 오류 또는 ActiveSheet 없음 |
 | Excel busy 5초 초과 | `Excel busy after 50 retries: {last}` | RPC busy를 50×0.1s 재시도한 뒤 포기 |
 | 감시 셀 수식 오류 | `{cell} formula is not a single A{row} ref` / `must reference column A` / `must reference the current sheet` / `row N is not in EXCEL_SLOT_ROWS` / `is empty` / `instrument matches N slot rows` | D2가 `=A41` 형태가 아니거나 허용 행이 아님. 종목 문자열이 0건·2건 매칭 |
@@ -72,19 +72,19 @@
 
 | 조건 | 메시지 | 의미 |
 |------|--------|------|
-| Start/Stop Fail | `(HH:nn:ss) Error: {Err.Description}` | pythonw가 안 뜬 상태일 수 있음 |
-| taskkill 비정상 코드 | `taskkill failed: {rc}` | 0=성공, 128=이미 없음(정상). 그 외는 Fail |
-| PowerShell sweep 종료코드 ≠ 0 | `Stop-Process failed: {rc}` | python/pythonw의 `main.py`만 대상. VBA를 엑셀에 다시 넣어야 최신 로직 적용 |
+| Start/Stop Fail | `(HH:nn:ss) Error: {Err.Description}` | pythonw가 안 뜬 상태일 수 있음. `.bas`를 엑셀에 다시 넣어야 최신 로직 적용 |
+| taskkill 비정상 코드 | `taskkill failed: {rc}` | 소프트 스톱(최대 8s) 뒤 최후 `/F`. 0=성공, 128=이미 없음(정상). 그 외는 Fail |
+| PowerShell sweep 종료코드 ≠ 0 | `Stop-Process failed: {rc}` | python/pythonw의 `main.py`만 대상. Excel은 죽이지 않음 |
 
 ## 에러가 아닌 것 (중단하지 않음)
 
 | 조건 | 보이는 것 | 의미 |
 |------|-----------|------|
 | 호가 미매칭 | 없음 | 감시 종목·side·수량이 안 맞으면 다음 줄 |
-| fingerprint 중복 | 없음 | 같은 `watermark_key`는 세션 내 재처리 안 함 |
-| MODE 3 시간 토큰 없는 호가 줄 | 없음 | `watermark_key`에 `(HH:MM`이 없으면 파서에 안 넘김 |
+| fingerprint 중복 | 없음 | MODE 1·2: 같은 `watermark_key`는 세션 내 재처리 안 함. MODE 3는 세션 set을 쓰지 않고, 리더가 개수가 늘어난 줄만 검토 |
 | 임계 미달 | J2 `Quote Skipped` | PnL이 BID/OFFER 조건을 못 채움. F2는 WATCHING |
 | 정상 중지 | J2 `Stopped`, F2 `STOPPED`, exit 0 | stop 플래그 또는 `StopRequested` |
+| Excel 닫힘 대기 | J2 `Excel closed; waiting to reopen {파일명}`, F2 `EXCEL_WAIT` | 워크북/RPC 소멸. 파일이 다시 열리면 WATCHING. 전송 없음. exit 하지 않음 |
 | `SENT_AFTER=exit` 전송 성공 | J2 `Message Sent`, F2 `SENT`, exit 0 | 한 번 보내고 종료 |
 | 문서 > 200만 wchar | 종료 없음 | 끝 200만만 읽음. 읽기 실패만 ERROR |
 

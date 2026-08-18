@@ -9,11 +9,12 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from excel import InstrumentSlot
+from excel import ExcelDisconnected, ExcelBridgeError, InstrumentSlot, StopRequested
 from main import (
     LINE_LOG_MAX_PER_POLL,
     _truncate_log_text,
     collect_batch_matches,
+    excel_failure_action,
     log_new_source_lines,
     watch_identity,
 )
@@ -64,11 +65,16 @@ def test_collect_batch_matches_skips_fingerprint() -> None:
     assert matches == []
 
 
-def test_collect_batch_matches_require_clock_skips() -> None:
+def test_collect_batch_matches_mode3_repeats_same_key() -> None:
     slot = _slot()
-    lines = [source_line("25-10 695 +")]
-    matches = collect_batch_matches(lines, [slot], set(), require_clock=True)
-    assert matches == []
+    line = source_line("25-10 695 +")
+    fp = message_fingerprint(line.watermark_key)
+    first = collect_batch_matches([line], [slot], set(), skip_fingerprints=True)
+    second = collect_batch_matches([line], [slot], {fp}, skip_fingerprints=True)
+    assert len(first) == 1
+    assert len(second) == 1
+    assert first[0][1].raw_token == "695 +"
+    assert second[0][1].raw_token == "695 +"
 
 
 def test_watch_identity_tuple() -> None:
@@ -108,4 +114,24 @@ def test_log_new_source_lines_cap_and_mode3_key() -> None:
         "LINE | mode=3 | looking_for=BID | threshold=0 | raw_line="
     )
     assert "(12:00:00) : body-0" in log.messages[0]
+
+
+def test_excel_failure_action_wait_then_error_while_calculating() -> None:
+    gone = ExcelDisconnected("Workbook 'sample.xlsm' is not open in Excel")
+    assert excel_failure_action(gone, calculating=False) == "wait"
+    assert excel_failure_action(gone, calculating=True) == "error"
+    assert excel_failure_action(StopRequested("stop flag set"), calculating=False) == "stop"
+    assert excel_failure_action(ExcelBridgeError("Worksheet '트레이딩' not found"), calculating=False) == "error"
+
+
+def test_excel_reconnect_state_sequence() -> None:
+    statuses = ["WATCHING"]
+    action = excel_failure_action(
+        ExcelDisconnected("Workbook 'sample.xlsm' is not open in Excel"),
+        calculating=False,
+    )
+    assert action == "wait"
+    statuses.append("EXCEL_WAIT")
+    statuses.append("WATCHING")
+    assert statuses == ["WATCHING", "EXCEL_WAIT", "WATCHING"]
 

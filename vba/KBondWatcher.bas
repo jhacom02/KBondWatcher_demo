@@ -1,12 +1,20 @@
 Attribute VB_Name = "KBondWatcher"
 Option Explicit
 
+#If VBA7 Then
+Private Declare PtrSafe Sub Sleep Lib "kernel32" (ByVal dwMilliseconds As Long)
+#Else
+Private Declare Sub Sleep Lib "kernel32" (ByVal dwMilliseconds As Long)
+#End If
+
 Private Const PYTHONW_PATH As String = "pythonw.exe"
 Private Const PROJECT_DIR As String = "C:\mycode\KBondWatcher"
 Private Const MAIN_PATH As String = "C:\mycode\KBondWatcher\main.py"
 Private Const CONFIG_PATH As String = "C:\mycode\KBondWatcher\.env"
 Private Const STOP_FLAG_PATH As String = "C:\temp\kbond_watcher.stop"
 Private Const PID_PATH As String = "C:\temp\kbond_watcher.pid"
+Private Const STOP_WAIT_MS As Long = 8000
+Private Const STOP_POLL_MS As Long = 200
 
 Private Const STATUS_CELL As String = "F2"
 Private Const LOOKING_FOR_CELL As String = "G2"
@@ -17,6 +25,8 @@ Private Const LAST_ACTION_CELL As String = "J2"
 Public Sub StartKBondWatcher()
     On Error GoTo Fail
 
+    WriteStopFlag
+    WaitForWatcherExit
     KillWatcherProcesses
     On Error GoTo Fail
     DeleteIfExists STOP_FLAG_PATH
@@ -44,6 +54,7 @@ Public Sub StopKBondWatcher()
     On Error GoTo Fail
 
     WriteStopFlag
+    WaitForWatcherExit
     KillWatcherProcesses
     On Error GoTo Fail
 
@@ -86,11 +97,54 @@ Private Sub DeleteIfExists(filePath As String)
     End If
 End Sub
 
+Private Function ReadPidText(fso As Object) As String
+    Dim ts As Object
+    Dim pidText As String
+    If Not fso.FileExists(PID_PATH) Then
+        ReadPidText = ""
+        Exit Function
+    End If
+    Set ts = fso.OpenTextFile(PID_PATH, 1)
+    If Not ts.AtEndOfStream Then pidText = Trim$(ts.ReadAll)
+    ts.Close
+    ReadPidText = Replace(Replace(pidText, vbCr, ""), vbLf, "")
+End Function
+
+Private Function PidStillRunning(pidText As String, sh As Object) As Boolean
+    Dim rc As Long
+    If Not IsNumeric(pidText) Then
+        PidStillRunning = False
+        Exit Function
+    End If
+    rc = sh.Run( _
+        "cmd /c tasklist /FI ""PID eq " & CLng(pidText) & """ | findstr /C:"" " & CLng(pidText) & " "">NUL", _
+        0, True)
+    PidStillRunning = (rc = 0)
+End Function
+
+Private Sub WaitForWatcherExit()
+    Dim fso As Object
+    Dim sh As Object
+    Dim elapsed As Long
+    Dim pidText As String
+
+    Set fso = CreateObject("Scripting.FileSystemObject")
+    Set sh = CreateObject("WScript.Shell")
+    elapsed = 0
+    Do While elapsed < STOP_WAIT_MS
+        If Not fso.FileExists(PID_PATH) Then Exit Sub
+        pidText = ReadPidText(fso)
+        If Not PidStillRunning(pidText, sh) Then Exit Sub
+        Sleep STOP_POLL_MS
+        elapsed = elapsed + STOP_POLL_MS
+        DoEvents
+    Loop
+End Sub
+
 Private Sub KillWatcherProcesses()
     On Error GoTo KillFail
     Dim sh As Object
     Dim fso As Object
-    Dim ts As Object
     Dim pidText As String
     Dim cmd As String
     Dim killRc As Long
@@ -99,23 +153,15 @@ Private Sub KillWatcherProcesses()
     Set sh = CreateObject("WScript.Shell")
     Set fso = CreateObject("Scripting.FileSystemObject")
 
-    If fso.FileExists(PID_PATH) Then
-        Set ts = fso.OpenTextFile(PID_PATH, 1)
-        If Not ts.AtEndOfStream Then pidText = Trim$(ts.ReadAll)
-        ts.Close
-        pidText = Replace(Replace(pidText, vbCr, ""), vbLf, "")
-        If IsNumeric(pidText) Then
-            killRc = sh.Run("taskkill /F /PID " & CLng(pidText), 0, True)
-            ' 0 = killed, 128 = process already gone
-            If killRc <> 0 And killRc <> 128 Then
-                Err.Raise vbObjectError + 1000, "KillWatcher", "taskkill failed: " & killRc
-            End If
+    pidText = ReadPidText(fso)
+    If IsNumeric(pidText) Then
+        killRc = sh.Run("taskkill /F /PID " & CLng(pidText), 0, True)
+        If killRc <> 0 And killRc <> 128 Then
+            Err.Raise vbObjectError + 1000, "KillWatcher", "taskkill failed: " & killRc
         End If
-        If fso.FileExists(PID_PATH) Then fso.DeleteFile PID_PATH, True
     End If
+    If fso.FileExists(PID_PATH) Then fso.DeleteFile PID_PATH, True
 
-    ' Only python/pythonw: this PowerShell command line also contains MAIN_PATH,
-    ' so matching every process by CommandLine would Stop-Process itself (Run → -1).
     cmd = "powershell.exe -NoProfile -WindowStyle Hidden -Command " & _
           """Get-CimInstance Win32_Process | Where-Object { " & _
           "($_.Name -eq 'pythonw.exe' -or $_.Name -eq 'python.exe') -and " & _

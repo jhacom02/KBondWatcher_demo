@@ -23,7 +23,7 @@ Windows에서 채권 채팅 호가를 감시하고, Excel PnL 임계값을 만�
 ### 1.2 하지 않는 일
 
 - OCR, Selenium, 카카오톡 전용 연동은 사용하지 않는다.
-- Excel을 새로 기동하지 않는다 (`GetActiveObject`로 이미 열린 인스턴스에 붙는다).
+- Excel을 새로 기동하지 않는다. `GetObject(경로)`와 ROT로 **이미 열린 워크북**에만 붙는다. `Dispatch`/`Quit` 없음.
 - 소스/전송 프로세스 identity는 `MODE` 프리셋이 고정한다. MODE 1·2 채팅방 제목만 `.env`의 `KBOND_CHAT_TITLE`.
 - 전송 클릭 비율은 `.env`의 `SEND_INPUT_*_M1` / `SEND_INPUT_*_M23`. MODE 1은 **분리 채팅창** 기준이다.
 - 여러 종목을 동시에 감시하지 않는다. 한 폴에서 호가가 2건 이상 매칭되면 보내지 않는다.
@@ -48,12 +48,13 @@ Windows에서 채권 채팅 호가를 감시하고, Excel PnL 임계값을 만�
 Excel VBA Start
     → pythonw main.py --config .env
         → Config.load(.env)
-        → ExcelBridge.connect / load_slots
+        → ExcelBridge.connect / load_slots (유휴 시 COM 해제)
         → create_source_reader(MODE)
         → send.ensure_target_window
         → watermark 초기화
         → loop:
               stop flag?
+              Excel 없으면 EXCEL_WAIT 후 GetObject 재시도
               get_new_message_lines
               배치 매칭 (0 skip / 1 proceed / 2+ ERROR)
               write yield → wait PnL
@@ -164,7 +165,7 @@ MODE 1·2는 `.env` **`KBOND_CHAT_TITLE`** (비면 안 됨)으로 분리창을 �
 
 ### 5.1 연결
 
-`GetActiveObject("Excel.Application")`. 워크북은 설정 경로와 `FullName` 일치, 또는 `Name`/파일명 매칭. RPC busy는 같은 호출만 50×0.1s 재시도.
+`GetObject(EXCEL_WORKBOOK 경로)`로 열린 파일에 붙는다. 실패하면 ROT 표시 이름 중 `workbook_matches_open`이 맞는 워크북만 고른다. `GetActiveObject("Excel.Application")` 단독 사용·`Dispatch`/`DispatchEx`/`Quit` 없음. 유휴 폴에서는 COM 참조를 놓는다 (`release_workbook`). 계산 대기 중에만 연결을 유지한다. 워크북이 없거나 RPC가 끊기면 `ExcelDisconnected` → F2 `EXCEL_WAIT`, 파일이 다시 열리면 재연결. PnL 계산 중 끊기면 ERROR. RPC busy는 같은 호출만 50×0.1s 재시도.
 
 ### 5.2 슬롯
 
@@ -234,37 +235,39 @@ evaluate에는 G2 문자열이 아니라 슬롯의 `BID`/`OFFER`를 넘긴다.
 
 ### 6.2 MODE 3 (UIA)
 
-의도: FORESTBOND가 접근성 트리에 노출하는 `Text`만 읽는다. 뷰포트 조각이므로 시각 토큰이 없는 호가 줄은 매칭하지 않는다.
+의도: FORESTBOND UIA `Text`의 호가 줄만 읽는다. 시계 결합은 없다. 신규 줄은 SHA1 set이 아니라 **직전 스냅샷 대비 문구 개수가 늘어난 줄**이다. LINE 로그와 호가 검토는 같은 신규 목록을 쓴다.
 
 1. 제목 `FORESTBOND` 창 중 면적 최대. 폴마다 데스크톱을 다시 훑지 않고 핸들을 든다. 무효·비가시면 `find_source_window`.  
 2. `Text` descendants. 열거 예외는 최대 2회 재시도 후 ERROR. 0건이면 즉시 ERROR.  
-3. 바로 앞 줄이 시간 토큰이면 다음 줄 `watermark_key` = `(시각) : {호가}`. 파서 `text`는 호가 조각.  
-4. 한 Text에 시각+호가가 이미 붙어 있으면 재결합하지 않는다.  
-5. 매칭 시 `watermark_key`에 `(HH:MM`이 없으면 skip (ERROR 아님).
-
-위로 스크롤하면 옛 조각이 신규로 보이거나 최신이 트리에서 빠질 수 있다. 맨 아래 유지가 전제다.
+3. `watermark_key` = 원문 줄. 한 스냅샷에 같은 문자열이 두 노드면 두 줄로 둔다.  
+4. `initialize_watermark`는 현재 가시 꼬리(최대 2000줄)를 시드만 한다. `PROCESS_EXISTING_ON_START`는 무시한다.  
+5. `get_new_message_lines`는 직전 스냅샷보다 `watermark_key` 개수가 늘어난 줄만 반환한다(앞에 끼워 넣은 호가 포함). 칸만 이동하면 개수가 같아 빈 목록. 공통 키가 없으면 빈 목록(스크롤한 옛 조각을 신규로 쏟지 않음).  
+6. 같은 화면 셀은 재처리하지 않는다. 같은 텍스트가 노드로 추가되거나 그 칸 값이 바뀌면 다시 LINE·매칭한다.  
+7. 한 폴에 매칭 호가 2건이면 `ambiguous quotes` ERROR (MODE 1·2와 같음).
 
 ### 6.3 Watermark
 
-| API | 동작 |
+MODE 1·2는 SHA1 set. MODE 3는 `_prev_snapshot` 문구 개수 비교.
+
+| API | 동작 (MODE 1·2) |
 |-----|------|
 | `initialize_watermark(false)` | 꼬리 창 fp로 set을 채움. 이후 새로 들어온 줄만 통과 |
 | `initialize_watermark(true)` | set을 비움. 꼬리 창도 신규 가능 |
 | `get_new_message_lines` | 꼬리 창에서 set에 없는 줄만 반환·FIFO add |
 | `reseed_watermark_from_visible` | 꼬리 창을 set에 union |
 
-`PROCESS_EXISTING_ON_START=false`: 기동 시점 꼬리 창은 스킵. `true`: 기동 시 보이는 줄도 처리 (재현 테스트용).
+`PROCESS_EXISTING_ON_START=false`: 기동 시점 꼬리 창은 스킵 (MODE 1·2). `true`: 기동 시 보이는 줄도 처리. MODE 3는 이 키를 무시하고 항상 시드만 한다.
 
 워터마크는 프로세스 메모리뿐이며 디스크에 저장하지 않는다.
 
 ### 6.4 세션 fingerprint
 
-`WatcherSession.processed_fingerprints`는 **파싱에 성공한** `watermark_key` SHA1이다.
+`WatcherSession.processed_fingerprints`는 **파싱에 성공한** `watermark_key` SHA1이다. MODE 1·2만 쓴다.
 
 - 소스 watermark: 이 채팅 식별 키를 이미 봤는가  
 - session set: 이 식별 키로 이미 매칭·처리했는가  
 
-MODE 3에서 같은 호가 문구라도 시각이 다르면 키가 달라 재기회다. `SENT_AFTER=loop`여도 session set은 비우지 않는다. `Quote.fingerprint`는 `raw_line` SHA1이며 워처 매칭에는 쓰지 않는다.
+`SENT_AFTER=loop`여도 MODE 1·2 session set은 비우지 않는다. MODE 3는 session set에 add하지 않는다. 같은 `watermark_key`라도 개수가 늘어나 리더가 넘기면 다시 매칭한다. 칸만 이동하거나 화면에만 남은 같은 셀은 빈 목록이라 재검토하지 않는다. `Quote.fingerprint`는 `raw_line` SHA1이며 워처 매칭에는 쓰지 않는다.
 
 ---
 
@@ -352,7 +355,7 @@ sleep(POLL_INTERVAL_MS)
 | 값 | 동작 |
 |----|------|
 | `exit` | SENT 기록 후 exit 0 |
-| `loop` | `reseed_watermark_from_visible` 후 WATCHING 유지 |
+| `loop` | MODE 1·2는 `reseed_watermark_from_visible` 후 WATCHING. MODE 3는 reseed 없이 WATCHING |
 
 ### 10.5 SENT 지연 로그
 
@@ -381,11 +384,13 @@ sleep(POLL_INTERVAL_MS)
 
 | Sub | 동작 |
 |-----|------|
-| `StartKBondWatcher` | 기존 워처 종료 → 플래그 삭제 → F2~J2 클리어 → `pythonw main.py --config .env` |
-| `StopKBondWatcher` | stop 플래그 → taskkill → F2 `STOPPED` |
+| `StartKBondWatcher` | stop 플래그 → PID 최대 8s 대기 → taskkill/python sweep → 플래그 삭제 → F2~J2 클리어 → `pythonw main.py --config .env` |
+| `StopKBondWatcher` | stop 플래그 → PID 최대 8s 대기 → taskkill/python sweep → F2 `STOPPED` |
 | Fail | F2 `ERROR`, J2 `(HH:nn:ss) Error: …` |
 
-`KillWatcher`는 PID `taskkill`(0·128 정상) 후 **python/pythonw**의 `main.py`만 PowerShell로 정리한다.
+`KillWatcher`는 대기가 끝난 뒤 PID `taskkill`(0·128 정상)과 **python/pythonw**의 `main.py`만 PowerShell로 정리한다. Excel/`EXCEL.EXE`는 죽이지 않는다. `.bas`를 바꾼 뒤에는 매크로를 통합문서에 다시 넣는다.
+
+이미 떠 있는 좀비 Excel은 코드가 안전하게 못 죽인다. 배포 직후 한 번만 작업 관리자로 `EXCEL.EXE`를 비운 뒤, 이후에는 COM 해제·워크북 지정 바인딩이 재발을 막는다.
 
 ---
 
@@ -397,11 +402,12 @@ sleep(POLL_INTERVAL_MS)
 | 키워드 | 때 |
 |--------|-----|
 | `WATCHING` | 기동·스킵 후 복귀 |
-| `LINE` | watermark를 통과한 신규 줄 (`mode`/`looking_for`/`threshold` 정수/`raw_line`). 폴당 최대 20, 160자 truncate. MODE 3는 `watermark_key` |
+| `EXCEL_WAIT` | 워크북이 닫힘. 재열림을 기다림. 전송 없음 |
+| `LINE` | 신규 줄 (`mode`/`looking_for`/`threshold` 정수/`raw_line`). 폴당 최대 20, 160자 truncate. MODE 1·2는 SHA1 워터마크 통과분, MODE 3는 문구 개수가 늘어난 줄 (`watermark_key`) |
 | `LINE_OMITTED` | 20줄 초과분 |
 | `QUOTE_FOUND` | 파싱 성공 1건 |
 | `NO_TRIGGER` / `TRIGGERED` / `SENT` / `STOPPED` / `ERROR` / `EXIT` | 상태 |
-| `EXCEL_CONNECTED` / `EXCEL_WRITE` / `PNL` | COM |
+| `EXCEL_CONNECTED` / `EXCEL_WAIT` / `EXCEL_WRITE` / `PNL` | COM |
 | `SLOTS_LOADED` | DEBUG |
 | `MESSAGE_SENT` | 전송 완료 |
 | `source watermark` / `reseed` | 게이트 |
@@ -419,13 +425,13 @@ pytest -q
 | `tests/test_config_mode.py` | MODE, 클릭 비율, `SENT_AFTER` |
 | `tests/test_quote_parser.py` | 파서 accept/reject |
 | `tests/test_trigger.py` | BID/OFFER, sanity band |
-| `tests/test_excel_bridge.py` | 감시 셀, CVErr, busy |
+| `tests/test_excel_bridge.py` | 감시 셀, CVErr, busy, gone, 워크북 바인딩 |
 | `tests/test_richedit_reader.py` | 캡, 창 제목 선택, 핸들 유효 |
 | `tests/test_send_ui.py` | 클릭 좌표, 클립보드 |
-| `tests/test_watcher_guards.py` | 배치 매칭, LINE 로그 |
+| `tests/test_watcher_guards.py` | 배치 매칭, LINE 로그, MODE 3 중복 매칭 |
 | `tests/test_perf_log.py` | SENT CSV append, mean/median |
-| `tests/test_uia_time.py` | 시각 토큰, UIA 창 캐시 |
-| `tests/test_watermark.py` | 2000줄 창, 신규 게이트 |
+| `tests/test_uia_time.py` | UIA 창 캐시, MODE 3 문구 개수 신규 줄 |
+| `tests/test_watermark.py` | MODE 1·2 2000줄 창, 신규 게이트 |
 
 ---
 
@@ -436,11 +442,13 @@ pytest -q
 3. 소스·전송·Excel을 연 뒤 `--diagnose-source` / `--diagnose-send`.  
 4. D2가 허용 행 한 종목, 그 행 E열이 0이 아닌 정수, E2가 숫자.  
 5. MODE 1·2는 제목이 맞는 **분리창**이 살아 있어야 한다. 닫거나 메인에 붙이면 ERROR.  
-6. MODE 3는 채팅을 맨 아래에 둔다. 시간 토큰 없는 호가 줄은 매칭하지 않는다.
+6. MODE 3는 테스트 수집용이다. 직전 화면보다 문구 개수가 늘어난 줄만 LINE·매칭한다. 칸만 이동하면 재전송하지 않는다.  
+7. VBA `.bas`를 고치면 통합문서에 매크로를 다시 넣는다.
 
 | 증상 | 점검 |
 |------|------|
 | 시작 즉시 ERROR | 창, Excel, 설정 키, J2 `Error:` |
+| F2 `EXCEL_WAIT` | 워크북을 다시 열면 WATCHING. 작업 관리자로 Excel을 죽일 필요 없음 |
 | WATCHING인데 무반응 | qty/side, `PROCESS_EXISTING_ON_START=false`, diagnose-source |
 | PnL만 되고 전송 없음 | I2 vs 임계, Looking For |
 | I2가 −2146826273 | `#VALUE!` 타임아웃 |

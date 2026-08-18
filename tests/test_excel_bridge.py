@@ -12,14 +12,20 @@ if str(ROOT) not in sys.path:
 from excel.bridge import (  # noqa: E402
     ExcelBridge,
     ExcelBridgeError,
+    ExcelDisconnected,
     StopRequested,
     bind_slot_cells,
     format_status,
     is_excel_busy,
+    is_excel_gone,
     normalize_instrument,
     parse_watch_row,
+    pick_matching_workbook,
     prefix_from_prev_yield,
+    rot_names_matching_workbook,
     to_float,
+    workbook_bind_paths,
+    workbook_identity,
     workbook_matches_open,
 )
 from core.models import AppStatus  # noqa: E402
@@ -81,9 +87,7 @@ def test_write_yield_read_pnl_retries_cverr(monkeypatch: pytest.MonkeyPatch) -> 
     assert bridge.write_yield_read_pnl("D41", "F44", 3.7) == -189049.0
 
 
-def test_resolve_workbook_fullname_exception() -> None:
-    bridge = _dummy_bridge()
-
+def test_workbook_identity_fullname_exception() -> None:
     class _Wb:
         Name = "sample.xlsm"
 
@@ -91,18 +95,8 @@ def test_resolve_workbook_fullname_exception() -> None:
         def FullName(self) -> str:
             raise RuntimeError("COM FullName failed")
 
-    class _Workbooks:
-        Count = 1
-
-        def __call__(self, index: int) -> _Wb:
-            return _Wb()
-
-    class _App:
-        Workbooks = _Workbooks()
-
-    bridge._app = _App()
     with pytest.raises(ExcelBridgeError, match="FullName"):
-        bridge._resolve_workbook()
+        workbook_identity(_Wb())
 
 
 def test_write_yield_read_pnl_timeout_on_cverr(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -132,6 +126,7 @@ def test_write_yield_read_pnl_timeout_on_cverr(monkeypatch: pytest.MonkeyPatch) 
 def test_format_status() -> None:
     assert format_status(AppStatus.SENT) == "SENT"
     assert format_status("WATCHING") == "WATCHING"
+    assert format_status(AppStatus.EXCEL_WAIT) == "EXCEL_WAIT"
 
 
 def test_workbook_matches_absolute_full_name() -> None:
@@ -317,3 +312,83 @@ def test_parse_watch_row_rejects_bad_formula() -> None:
             _SLOT_ROWS,
             {19: "국고 25-10", 41: "국고 25-10"},
         )
+
+
+def test_workbook_bind_paths_normalizes() -> None:
+    paths = workbook_bind_paths(r"C:/mycode/KBondWatcher/data/sample.xlsm")
+    assert paths[0] == r"C:\mycode\KBondWatcher\data\sample.xlsm"
+    assert all("\\" in p or p.startswith("C:") for p in paths)
+
+
+def test_pick_matching_workbook_by_name() -> None:
+    wanted = object()
+    other = object()
+    got = pick_matching_workbook(
+        r"C:\mycode\KBondWatcher\data\sample.xlsm",
+        [
+            ("other.xlsm", r"C:\tmp\other.xlsm", other),
+            ("sample.xlsm", r"D:\elsewhere\sample.xlsm", wanted),
+        ],
+    )
+    assert got is wanted
+
+
+def test_pick_matching_workbook_missing_raises_disconnected() -> None:
+    with pytest.raises(ExcelDisconnected, match="is not open"):
+        pick_matching_workbook(
+            r"C:\mycode\KBondWatcher\data\sample.xlsm",
+            [("other.xlsm", r"C:\tmp\other.xlsm", object())],
+        )
+
+
+def test_rot_names_matching_workbook() -> None:
+    cfg = r"C:\mycode\KBondWatcher\data\sample.xlsm"
+    names = rot_names_matching_workbook(
+        cfg,
+        [
+            "!{00020812-0000-0000-C000-000000000046}",
+            r"C:\mycode\KBondWatcher\data\sample.xlsm",
+            r"C:\tmp\other.xlsm",
+            "",
+        ],
+    )
+    assert names == [r"C:\mycode\KBondWatcher\data\sample.xlsm"]
+
+
+def test_is_excel_gone_rpc() -> None:
+    exc = _FakeComError(-2147023174, "The RPC server is unavailable.")
+    assert is_excel_gone(exc) is True
+    assert is_excel_busy(exc) is False
+
+
+def test_is_excel_gone_not_sheet_or_busy() -> None:
+    assert is_excel_gone(ExcelBridgeError("Worksheet '트레이딩' not found")) is False
+    busy = _FakeComError(-2147417846, "The message filter indicated that the application is busy.")
+    assert is_excel_gone(busy) is False
+    assert is_excel_gone(ExcelDisconnected("Workbook 'x' is not open in Excel")) is True
+
+
+def test_call_excel_gone_raises_disconnected() -> None:
+    bridge = _dummy_bridge()
+
+    def _gone() -> None:
+        raise _FakeComError(-2147023174, "The RPC server is unavailable.")
+
+    with pytest.raises(ExcelDisconnected, match="is not open"):
+        bridge._call_excel(_gone)
+
+
+def test_release_workbook_keeps_com_apartment() -> None:
+    bridge = _dummy_bridge()
+    sentinel = object()
+    bridge._pythoncom = sentinel
+    bridge._connected = True
+    bridge._app = object()
+    bridge._wb = object()
+    bridge._ws = object()
+    bridge.release_workbook()
+    assert bridge._connected is False
+    assert bridge._app is None
+    assert bridge._wb is None
+    assert bridge._ws is None
+    assert bridge._pythoncom is sentinel

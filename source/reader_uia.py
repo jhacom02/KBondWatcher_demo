@@ -1,46 +1,47 @@
 from __future__ import annotations
 
-import re
 import time
+from collections import Counter
 from typing import Optional
 
 import win32gui
 from pywinauto import Desktop
 from pywinauto.base_wrapper import BaseWrapper
 
-from .common import BaseSourceReader, SourceLine, SourceReaderError, source_line
-
-_TIME_LINE = re.compile(
-    r"^(?:(?P<sender>.+?)\s+)?\((?P<ts>\d{1,2}:\d{2}(?::\d{2})?)\)\s*[:：]?\s*$"
+from .common import (
+    BaseSourceReader,
+    SourceLine,
+    SourceReaderError,
+    source_line,
+    watermark_window,
 )
-_CLOCK_TOKEN = re.compile(r"\(\d{1,2}:\d{2}")
 
 UIA_TEXT_ENUM_MAX_RETRIES = 2
 UIA_TEXT_ENUM_RETRY_DELAY_SECONDS = 0.05
 
 
-def watermark_has_clock(key: str) -> bool:
-    return _CLOCK_TOKEN.search(key) is not None
-
-
-def attach_preceding_time(seq: list[str]) -> list[SourceLine]:
-    out: list[SourceLine] = []
-    prev_ts: Optional[str] = None
-    for raw in seq:
-        text = (raw or "").strip()
-        if not text:
+def new_lines_after(prev: list[SourceLine], now: list[SourceLine]) -> list[SourceLine]:
+    if not prev:
+        return []
+    prev_keys = [item.watermark_key for item in prev]
+    now_keys = [item.watermark_key for item in now]
+    if not (set(prev_keys) & set(now_keys)):
+        return []
+    prev_c = Counter(prev_keys)
+    need: dict[str, int] = {}
+    for key, count in Counter(now_keys).items():
+        extra = count - prev_c[key]
+        if extra > 0:
+            need[key] = extra
+    new: list[SourceLine] = []
+    for item in now:
+        key = item.watermark_key
+        left = need.get(key, 0)
+        if left <= 0:
             continue
-        time_match = _TIME_LINE.fullmatch(text)
-        if time_match is not None:
-            prev_ts = time_match.group("ts")
-            out.append(source_line(text))
-            continue
-        if prev_ts is not None:
-            out.append(source_line(text, f"({prev_ts}) : {text}"))
-            prev_ts = None
-            continue
-        out.append(source_line(text))
-    return out
+        new.append(item)
+        need[key] = left - 1
+    return new
 
 
 class UiaSourceReader(BaseSourceReader):
@@ -50,6 +51,7 @@ class UiaSourceReader(BaseSourceReader):
         if not self.source_window_title.strip():
             raise SourceReaderError("source_window_title is required")
         self._window: Optional[BaseWrapper] = None
+        self._prev_snapshot: list[SourceLine] = []
 
     def find_source_window(self) -> BaseWrapper:
         desktop = Desktop(backend="uia")
@@ -138,15 +140,31 @@ class UiaSourceReader(BaseSourceReader):
                 cleaned = line.strip()
                 if cleaned:
                     raw_lines.append(cleaned)
-        paired = attach_preceding_time(raw_lines)
-        lines: list[SourceLine] = []
-        seen: set[str] = set()
-        for item in paired:
-            if item.watermark_key in seen:
-                continue
-            seen.add(item.watermark_key)
-            lines.append(item)
-        return lines
+        return [source_line(raw) for raw in raw_lines]
+
+    def initialize_watermark(
+        self,
+        process_existing_on_start: bool,
+        lines: Optional[list[SourceLine]] = None,
+    ) -> None:
+        current = lines if lines is not None else self.get_visible_message_lines()
+        self._prev_snapshot = watermark_window(current)
+        self._initialized = True
+
+    def reseed_watermark_from_visible(self) -> None:
+        return
+
+    def get_new_message_lines(
+        self,
+        process_existing_on_start: bool = False,
+    ) -> list[SourceLine]:
+        now = watermark_window(self.get_visible_message_lines())
+        if not self._initialized:
+            self.initialize_watermark(process_existing_on_start, lines=now)
+            return []
+        new = new_lines_after(self._prev_snapshot, now)
+        self._prev_snapshot = now
+        return new
 
     def diagnose(self, max_messages: int = 200) -> str:
         win = self.find_source_window()

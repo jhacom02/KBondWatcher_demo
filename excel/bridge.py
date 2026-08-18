@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import gc
 import logging
 import math
 import re
@@ -21,6 +22,10 @@ COM_BUSY_RETRY_DELAY_SECONDS = 0.1
 
 _RPC_E_SERVERCALL_RETRYLATER = -2147417846
 _RPC_E_CALL_REJECTED = -2147418111
+_RPC_S_SERVER_UNAVAILABLE = -2147023174
+_RPC_E_DISCONNECTED = -2147417848
+_MK_E_UNAVAILABLE = -2147221020
+_MK_E_NOOBJECT = -2147221021
 _BUSY_HRESULTS = frozenset(
     {
         _RPC_E_SERVERCALL_RETRYLATER,
@@ -28,6 +33,24 @@ _BUSY_HRESULTS = frozenset(
         _RPC_E_SERVERCALL_RETRYLATER & 0xFFFFFFFF,
         _RPC_E_CALL_REJECTED & 0xFFFFFFFF,
     }
+)
+_GONE_HRESULTS = frozenset(
+    {
+        _RPC_S_SERVER_UNAVAILABLE,
+        _RPC_E_DISCONNECTED,
+        _MK_E_UNAVAILABLE,
+        _MK_E_NOOBJECT,
+        _RPC_S_SERVER_UNAVAILABLE & 0xFFFFFFFF,
+        _RPC_E_DISCONNECTED & 0xFFFFFFFF,
+        _MK_E_UNAVAILABLE & 0xFFFFFFFF,
+        _MK_E_NOOBJECT & 0xFFFFFFFF,
+    }
+)
+_GONE_MESSAGE_NEEDLES = (
+    "rpc server is unavailable",
+    "the object invoked has disconnected",
+    "is not open in excel",
+    "operation unavailable",
 )
 
 _GUKGO_PREFIX = re.compile(r"^국고\s*")
@@ -42,18 +65,41 @@ class ExcelBridgeError(RuntimeError):
     pass
 
 
+class ExcelDisconnected(ExcelBridgeError):
+    pass
+
+
 class StopRequested(Exception):
     pass
 
 
-def is_excel_busy(exc: BaseException) -> bool:
+def _hresult_from_exc(exc: BaseException) -> Optional[int]:
     args = getattr(exc, "args", None)
     if not args:
-        return False
+        return None
     hresult = args[0]
     if not isinstance(hresult, int):
+        return None
+    return hresult
+
+
+def is_excel_busy(exc: BaseException) -> bool:
+    hresult = _hresult_from_exc(exc)
+    if hresult is None:
         return False
     return hresult in _BUSY_HRESULTS or (hresult - 0x100000000) in _BUSY_HRESULTS
+
+
+def is_excel_gone(exc: BaseException) -> bool:
+    if isinstance(exc, ExcelDisconnected):
+        return True
+    hresult = _hresult_from_exc(exc)
+    if hresult is not None and (
+        hresult in _GONE_HRESULTS or (hresult - 0x100000000) in _GONE_HRESULTS
+    ):
+        return True
+    text = str(exc).lower()
+    return any(needle in text for needle in _GONE_MESSAGE_NEEDLES)
 
 
 @dataclass(frozen=True)
@@ -243,6 +289,118 @@ def workbook_matches_open(config_workbook: str, wb_name: str, wb_full_name: str)
     return False
 
 
+def workbook_bind_paths(config_workbook: str) -> list[str]:
+    configured = (config_workbook or "").strip()
+    if not configured:
+        return []
+    out: list[str] = []
+
+    def _add(path: str) -> None:
+        normalized = path.replace("/", "\\")
+        if normalized and normalized not in out:
+            out.append(normalized)
+
+    _add(configured)
+    expanded = Path(configured).expanduser()
+    try:
+        _add(str(expanded.resolve()))
+    except OSError:
+        _add(str(expanded))
+    return out
+
+
+def pick_matching_workbook(
+    config_workbook: str,
+    candidates: Sequence[tuple[str, str, Any]],
+) -> Any:
+    for name, full, wb in candidates:
+        if workbook_matches_open(config_workbook, name, full):
+            return wb
+    raise ExcelDisconnected(
+        f"Workbook '{config_workbook}' is not open in Excel"
+    )
+
+
+def rot_names_matching_workbook(
+    config_workbook: str, display_names: Sequence[str]
+) -> list[str]:
+    matched: list[str] = []
+    for raw in display_names:
+        display = str(raw or "").strip()
+        if not display or display.startswith("!"):
+            continue
+        name = Path(display).name
+        if workbook_matches_open(config_workbook, name, display):
+            matched.append(display)
+    return matched
+
+
+def workbook_identity(wb: Any) -> tuple[str, str]:
+    name = str(wb.Name)
+    try:
+        full = str(wb.FullName)
+    except Exception as exc:
+        raise ExcelBridgeError(
+            f"Failed to read FullName for workbook {name!r}: {exc}"
+        ) from exc
+    return name, full
+
+
+def bind_open_workbook(workbook_name: str) -> Any:
+    import pythoncom
+    import win32com.client
+
+    configured = (workbook_name or "").strip()
+    if not configured:
+        raise ExcelDisconnected("Workbook path is empty")
+
+    last_exc: Optional[BaseException] = None
+    for path in workbook_bind_paths(configured):
+        try:
+            wb = win32com.client.GetObject(path)
+            name, full = workbook_identity(wb)
+            if workbook_matches_open(configured, name, full):
+                return wb
+        except ExcelBridgeError:
+            raise
+        except Exception as exc:
+            last_exc = exc
+            continue
+
+    try:
+        rot = pythoncom.GetRunningObjectTable()
+        enum = rot.EnumRunning()
+        ctx = pythoncom.CreateBindCtx(0)
+        display_names: list[str] = []
+        while True:
+            monikers = enum.Next(1)
+            if not monikers:
+                break
+            try:
+                display_names.append(str(monikers[0].GetDisplayName(ctx, None) or ""))
+            except Exception:
+                continue
+        for display in rot_names_matching_workbook(configured, display_names):
+            try:
+                wb = win32com.client.GetObject(display)
+                name, full = workbook_identity(wb)
+                if workbook_matches_open(configured, name, full):
+                    return wb
+            except ExcelBridgeError:
+                raise
+            except Exception as exc:
+                last_exc = exc
+                continue
+    except ExcelBridgeError:
+        raise
+    except Exception as exc:
+        last_exc = exc
+
+    raise ExcelDisconnected(
+        f"Workbook '{configured}' is not open in Excel"
+    ) from last_exc
+
+
 class ExcelBridge:
     def __init__(
         self,
@@ -306,11 +464,18 @@ class ExcelBridge:
                 return fn()
             except StopRequested:
                 raise
+            except ExcelDisconnected:
+                raise
             except Exception as exc:
                 if is_excel_busy(exc):
                     last = exc
                     time.sleep(COM_BUSY_RETRY_DELAY_SECONDS)
                     continue
+                if is_excel_gone(exc):
+                    self.release_workbook()
+                    raise ExcelDisconnected(
+                        f"Workbook '{self.workbook_name}' is not open in Excel"
+                    ) from exc
                 raise
         raise ExcelBridgeError(
             f"Excel busy after {COM_BUSY_RETRY_COUNT} retries: {last}"
@@ -321,26 +486,32 @@ class ExcelBridge:
             return
         try:
             import pythoncom
-            import win32com.client
         except ImportError as exc:
             raise ExcelBridgeError("pywin32 is required for Excel COM") from exc
 
-        self._pythoncom = pythoncom
-        pythoncom.CoInitialize()
+        if self._pythoncom is None:
+            self._pythoncom = pythoncom
+            pythoncom.CoInitialize()
         try:
-            self._app = self._call_excel(
-                lambda: win32com.client.GetActiveObject("Excel.Application"),
-                check_stop=False,
-            )
+            self._wb = self._call_excel(self._bind_workbook, check_stop=False)
+            self._app = self._wb.Application
+            self._ws = self._resolve_worksheet(self._wb)
+        except ExcelDisconnected:
+            self.release_workbook()
+            raise
         except ExcelBridgeError:
+            self.release_workbook()
             raise
         except Exception as exc:
+            self.release_workbook()
+            if is_excel_gone(exc):
+                raise ExcelDisconnected(
+                    f"Workbook '{self.workbook_name}' is not open in Excel"
+                ) from exc
             raise ExcelBridgeError(
-                "Failed to connect to running Excel.Application"
+                f"Failed to connect to running Excel.Application: {exc}"
             ) from exc
 
-        self._wb = self._resolve_workbook()
-        self._ws = self._resolve_worksheet(self._wb)
         self._connected = True
         logger.info(
             "EXCEL_CONNECTED | workbook=%s sheet=%s",
@@ -348,27 +519,8 @@ class ExcelBridge:
             getattr(self._ws, "Name", "?"),
         )
 
-    def _resolve_workbook(self) -> Any:
-        assert self._app is not None
-        if self.workbook_name:
-            for i in range(1, self._app.Workbooks.Count + 1):
-                wb = self._app.Workbooks(i)
-                name = str(wb.Name)
-                try:
-                    full = str(wb.FullName)
-                except Exception as exc:
-                    raise ExcelBridgeError(
-                        f"Failed to read FullName for workbook {name!r}: {exc}"
-                    ) from exc
-                if workbook_matches_open(self.workbook_name, name, full):
-                    return wb
-            raise ExcelBridgeError(
-                f"Workbook '{self.workbook_name}' is not open in Excel"
-            )
-        wb = self._app.ActiveWorkbook
-        if wb is None:
-            raise ExcelBridgeError("No ActiveWorkbook available in Excel")
-        return wb
+    def _bind_workbook(self) -> Any:
+        return bind_open_workbook(self.workbook_name)
 
     def _resolve_worksheet(self, wb: Any) -> Any:
         if self.sheet_name:
@@ -383,21 +535,34 @@ class ExcelBridge:
             raise ExcelBridgeError("No ActiveSheet available")
         return ws
 
+    def release_workbook(self) -> None:
+        self._connected = False
+        self._app = None
+        self._wb = None
+        self._ws = None
+        gc.collect()
+
     def _ensure(self) -> None:
         if not self._connected or self._ws is None or self._app is None:
             self.connect()
 
     def read_cell_float(self, addr: str) -> float:
         self._ensure()
-        raw = self._call_excel(lambda: self._ws.Range(addr).Value)
-        return to_float(raw)
+        try:
+            raw = self._call_excel(lambda: self._ws.Range(addr).Value)
+            return to_float(raw)
+        finally:
+            self.release_workbook()
 
     def read_cell_text(self, addr: str) -> str:
         self._ensure()
-        raw = self._call_excel(lambda: self._ws.Range(addr).Value)
-        if raw is None:
-            return ""
-        return str(raw).strip()
+        try:
+            raw = self._call_excel(lambda: self._ws.Range(addr).Value)
+            if raw is None:
+                return ""
+            return str(raw).strip()
+        finally:
+            self.release_workbook()
 
     def _yield_prefix_for_row(self, row: int, prefix_3y: float, prefix_10y: float) -> float:
         if row in self.rows_10y:
@@ -408,6 +573,12 @@ class ExcelBridge:
 
     def load_slots(self) -> tuple[list[InstrumentSlot], str, float]:
         self._ensure()
+        try:
+            return self._load_slots_connected()
+        finally:
+            self.release_workbook()
+
+    def _load_slots_connected(self) -> tuple[list[InstrumentSlot], str, float]:
 
         def _read() -> tuple[Any, Any, Any, dict[int, Any], dict[int, Any], Any, Any]:
             watch = self._ws.Range(self.watch_cell)
@@ -511,10 +682,13 @@ class ExcelBridge:
 
     def read_pnl(self, pnl_cell: str) -> float:
         self._ensure()
-        raw = self._call_excel(lambda: self._ws.Range(pnl_cell).Value)
-        pnl = to_float(raw)
-        logger.info("PNL | %s=%s", pnl_cell, pnl)
-        return pnl
+        try:
+            raw = self._call_excel(lambda: self._ws.Range(pnl_cell).Value)
+            pnl = to_float(raw)
+            logger.info("PNL | %s=%s", pnl_cell, pnl)
+            return pnl
+        finally:
+            self.release_workbook()
 
     def write_yield_read_pnl(
         self,
@@ -522,46 +696,49 @@ class ExcelBridge:
         pnl_cell: str,
         yield_value: float,
     ) -> float:
-        self.write_yield(input_cell, yield_value)
-        self._ensure()
-        assert self._app is not None
-        deadline = time.monotonic() + self.calc_wait_timeout_seconds
-        state: Optional[int] = None
-        last_raw: Any = None
-        last_detail = "pending"
-        while True:
-            try:
-                state = int(self._call_excel(lambda: self._app.CalculationState))
-            except StopRequested:
-                raise
-            except ExcelBridgeError:
-                raise
-            except Exception as exc:
-                raise ExcelBridgeError(
-                    f"Failed to read Excel CalculationState: {exc}"
-                ) from exc
-            if state != XL_DONE:
-                last_detail = f"CalculationState={state}"
-            else:
-                last_raw = self._call_excel(lambda: self._ws.Range(pnl_cell).Value)
-                err = excel_cv_error_name(last_raw)
-                if err is not None:
-                    last_detail = err
+        try:
+            self.write_yield(input_cell, yield_value)
+            self._ensure()
+            assert self._app is not None
+            deadline = time.monotonic() + self.calc_wait_timeout_seconds
+            state: Optional[int] = None
+            last_raw: Any = None
+            last_detail = "pending"
+            while True:
+                try:
+                    state = int(self._call_excel(lambda: self._app.CalculationState))
+                except StopRequested:
+                    raise
+                except ExcelBridgeError:
+                    raise
+                except Exception as exc:
+                    raise ExcelBridgeError(
+                        f"Failed to read Excel CalculationState: {exc}"
+                    ) from exc
+                if state != XL_DONE:
+                    last_detail = f"CalculationState={state}"
                 else:
-                    try:
-                        pnl = to_float(last_raw)
-                        logger.info("PNL | %s=%s", pnl_cell, pnl)
-                        return pnl
-                    except ExcelBridgeError as exc:
-                        last_detail = str(exc)
-            if time.monotonic() >= deadline:
-                raise ExcelBridgeError(
-                    f"{pnl_cell} not numeric after "
-                    f"{self.calc_wait_timeout_seconds:.1f}s "
-                    f"({last_detail}, CalculationState={state}, "
-                    f"value={last_raw!r})"
-                )
-            time.sleep(CALC_POLL_INTERVAL_SECONDS)
+                    last_raw = self._call_excel(lambda: self._ws.Range(pnl_cell).Value)
+                    err = excel_cv_error_name(last_raw)
+                    if err is not None:
+                        last_detail = err
+                    else:
+                        try:
+                            pnl = to_float(last_raw)
+                            logger.info("PNL | %s=%s", pnl_cell, pnl)
+                            return pnl
+                        except ExcelBridgeError as exc:
+                            last_detail = str(exc)
+                if time.monotonic() >= deadline:
+                    raise ExcelBridgeError(
+                        f"{pnl_cell} not numeric after "
+                        f"{self.calc_wait_timeout_seconds:.1f}s "
+                        f"({last_detail}, CalculationState={state}, "
+                        f"value={last_raw!r})"
+                    )
+                time.sleep(CALC_POLL_INTERVAL_SECONDS)
+        finally:
+            self.release_workbook()
 
     def update_status(
         self,
@@ -590,19 +767,25 @@ class ExcelBridge:
             self._call_excel(_write, check_stop=False)
         except StopRequested:
             raise
+        except ExcelDisconnected:
+            raise
         except Exception as exc:
             if ignore_error:
                 logger.error("Excel status update failed: %s", exc)
                 return
+            if is_excel_gone(exc):
+                raise ExcelDisconnected(
+                    f"Workbook '{self.workbook_name}' is not open in Excel"
+                ) from exc
             raise ExcelBridgeError(f"Excel status update failed: {exc}") from exc
+        finally:
+            self.release_workbook()
 
     def close(self) -> None:
+        self.release_workbook()
         if self._pythoncom is not None:
             try:
                 self._pythoncom.CoUninitialize()
             except Exception as exc:
                 logger.error("Excel CoUninitialize failed: %s", exc)
-        self._connected = False
-        self._app = None
-        self._wb = None
-        self._ws = None
+            self._pythoncom = None

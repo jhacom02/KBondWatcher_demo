@@ -9,66 +9,12 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from source.reader_uia import attach_preceding_time, UiaSourceReader, watermark_has_clock
+from source.common import SourceReaderError, source_line
+from source.reader_uia import UiaSourceReader, new_lines_after
 
 
-def test_attach_preceding_time_binds_immediate_time_line() -> None:
-    items = attach_preceding_time(
-        [
-            "권** (17:48:01) :",
-            "26-3 005 01 + 20",
-            "(**증권 종합금융팀 02-****)",
-        ]
-    )
-    assert items[0].text == "권** (17:48:01) :"
-    assert items[0].watermark_key == "권** (17:48:01) :"
-    assert items[1].text == "26-3 005 01 + 20"
-    assert items[1].watermark_key == "(17:48:01) : 26-3 005 01 + 20"
-    assert items[2].text == "(**증권 종합금융팀 02-****)"
-    assert items[2].watermark_key == "(**증권 종합금융팀 02-****)"
-
-
-def test_attach_preceding_time_bare_clock() -> None:
-    items = attach_preceding_time(["(17:48:01) :", "25-10 695 +"])
-    assert items[1].text == "25-10 695 +"
-    assert items[1].watermark_key == "(17:48:01) : 25-10 695 +"
-
-
-def test_attach_preceding_time_no_time_keeps_quote() -> None:
-    items = attach_preceding_time(["26-3 005 01 + 20"])
-    assert items[0].text == "26-3 005 01 + 20"
-    assert items[0].watermark_key == "26-3 005 01 + 20"
-
-
-def test_attach_preceding_time_does_not_split_combined_line() -> None:
-    full = "권** (17:48:01) : 26-3 005 01 + 20"
-    items = attach_preceding_time([full])
-    assert len(items) == 1
-    assert items[0].text == full
-    assert items[0].watermark_key == full
-
-
-def test_attach_preceding_time_same_quote_two_clocks() -> None:
-    items = attach_preceding_time(
-        [
-            "(17:48:01) :",
-            "26-3 005 01 + 20",
-            "(17:48:02) :",
-            "26-3 005 01 + 20",
-        ]
-    )
-    quotes = [item for item in items if item.text == "26-3 005 01 + 20"]
-    assert [item.watermark_key for item in quotes] == [
-        "(17:48:01) : 26-3 005 01 + 20",
-        "(17:48:02) : 26-3 005 01 + 20",
-    ]
-
-
-def test_watermark_has_clock() -> None:
-    assert watermark_has_clock("(17:48:01) : 25-10 695 +")
-    assert watermark_has_clock("권** (17:48) :")
-    assert not watermark_has_clock("26-3 005 01 + 20")
-    assert not watermark_has_clock("(**증권 종합금융팀 02-****)")
+def _keys(lines: list) -> list[str]:
+    return [item.watermark_key for item in lines]
 
 
 def test_uia_reuses_window_when_handle_valid(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -125,8 +71,6 @@ def test_uia_text_enum_retries_then_succeeds(monkeypatch: pytest.MonkeyPatch) ->
 
 
 def test_uia_text_enum_retries_then_errors(monkeypatch: pytest.MonkeyPatch) -> None:
-    from source.common import SourceReaderError
-
     reader = UiaSourceReader("FORESTBOND")
     calls = {"n": 0}
 
@@ -142,3 +86,138 @@ def test_uia_text_enum_retries_then_errors(monkeypatch: pytest.MonkeyPatch) -> N
     with pytest.raises(SourceReaderError, match="Failed to enumerate Text controls"):
         reader.get_visible_message_lines()
     assert calls["n"] == 3
+
+
+def test_new_lines_after_empty_prev() -> None:
+    assert new_lines_after([], [source_line("a")]) == []
+
+
+def test_new_lines_after_same_snapshot() -> None:
+    snap = [source_line("x"), source_line("y")]
+    assert new_lines_after(snap, snap) == []
+
+
+def test_new_lines_after_append() -> None:
+    prev = [source_line("a"), source_line("b")]
+    now = [source_line("a"), source_line("b"), source_line("c")]
+    assert _keys(new_lines_after(prev, now)) == ["c"]
+
+
+def test_new_lines_after_prefix_drop_then_append() -> None:
+    prev = [
+        source_line("chrome"),
+        source_line("old1"),
+        source_line("old2"),
+        source_line("quote"),
+    ]
+    now = [
+        source_line("chrome"),
+        source_line("old2"),
+        source_line("quote"),
+        source_line("new"),
+    ]
+    assert _keys(new_lines_after(prev, now)) == ["new"]
+
+
+def test_new_lines_after_no_overlap() -> None:
+    prev = [source_line("a"), source_line("b")]
+    now = [source_line("x"), source_line("y")]
+    assert new_lines_after(prev, now) == []
+
+
+def test_new_lines_after_prepend_after_chrome() -> None:
+    prev = [
+        source_line("chrome"),
+        source_line("25-10 76+"),
+        source_line("국주"),
+    ]
+    now = [
+        source_line("chrome"),
+        source_line("25-10 755-"),
+        source_line("25-10 76+"),
+        source_line("국주"),
+    ]
+    assert _keys(new_lines_after(prev, now)) == ["25-10 755-"]
+
+
+def test_new_lines_after_in_place_replace() -> None:
+    prev = [source_line("chrome"), source_line("25-10 76+")]
+    now = [source_line("chrome"), source_line("25-10 77+")]
+    assert _keys(new_lines_after(prev, now)) == ["25-10 77+"]
+
+
+def test_new_lines_after_duplicate_string_appended() -> None:
+    prev = [source_line("chrome"), source_line("25-10 77+")]
+    now = [
+        source_line("chrome"),
+        source_line("25-10 77+"),
+        source_line("25-10 77+"),
+    ]
+    assert _keys(new_lines_after(prev, now)) == ["25-10 77+"]
+
+
+def test_new_lines_after_reorder_same_counts_is_empty() -> None:
+    prev = [
+        source_line("chrome"),
+        source_line("25-10 76+"),
+        source_line("국주"),
+    ]
+    now = [
+        source_line("chrome"),
+        source_line("국주"),
+        source_line("25-10 76+"),
+    ]
+    assert new_lines_after(prev, now) == []
+
+
+def test_uia_visible_keeps_duplicate_quote_nodes(monkeypatch: pytest.MonkeyPatch) -> None:
+    reader = UiaSourceReader("FORESTBOND")
+
+    class _Ctrl:
+        def __init__(self, text: str) -> None:
+            self._text = text
+
+        def window_text(self) -> str:
+            return self._text
+
+    class _Win:
+        handle = 42
+
+        def descendants(self, control_type: str | None = None) -> list[_Ctrl]:
+            return [_Ctrl("25-10 77+"), _Ctrl("25-10 77+")]
+
+    monkeypatch.setattr(reader, "_ensure_window", lambda: _Win())
+    lines = reader.get_visible_message_lines()
+    assert [item.text for item in lines] == ["25-10 77+", "25-10 77+"]
+
+
+def test_uia_get_new_message_lines_same_snapshot_is_empty() -> None:
+    reader = UiaSourceReader("FORESTBOND")
+    quote = source_line("25-10 775+")
+    reader.get_visible_message_lines = lambda: [quote]  # type: ignore[method-assign]
+    reader.initialize_watermark(False)
+    first = reader.get_new_message_lines()
+    second = reader.get_new_message_lines()
+    assert first == []
+    assert second == []
+
+
+def test_uia_get_new_message_lines_returns_suffix() -> None:
+    reader = UiaSourceReader("FORESTBOND")
+    snapshots: list[list] = [
+        [source_line("a"), source_line("b")],
+        [source_line("a"), source_line("b")],
+        [source_line("a"), source_line("b"), source_line("c")],
+    ]
+    state = {"n": 0}
+
+    def _visible() -> list:
+        idx = min(state["n"], len(snapshots) - 1)
+        state["n"] += 1
+        return list(snapshots[idx])
+
+    reader.get_visible_message_lines = _visible  # type: ignore[method-assign]
+    reader.initialize_watermark(False)
+    assert reader.get_new_message_lines() == []
+    got = reader.get_new_message_lines()
+    assert [item.text for item in got] == ["c"]
