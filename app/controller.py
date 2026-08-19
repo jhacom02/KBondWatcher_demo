@@ -14,6 +14,7 @@ from app import ENGINE_VERSION
 from app.adapter import config_from_profile
 from app.audit import append_audit
 from app.defaults import DEFAULTS
+from app.demo_expiry import check_demo_expiry
 from app.deploy_mode import is_dev
 from app.license import (
     LicenseError,
@@ -65,6 +66,7 @@ def preflight(profile: TraderProfile) -> PreflightResult:
     machine = load_or_create_machine()
     device = load_or_create_device(machine.machine_id)
     try:
+        check_demo_expiry()
         verify_signed_profile(profile, load_profile_signature())
         lease = load_lease()
         admin_url = (os.environ.get("KBOND_ADMIN_URL") or "").strip()

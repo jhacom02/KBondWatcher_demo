@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import hmac
 import json
+import os
 import sqlite3
 import time
 from pathlib import Path
@@ -19,6 +20,23 @@ DB_PATH = Path(__file__).resolve().parent / "admin.db"
 TEMPLATES = Jinja2Templates(directory=str(Path(__file__).parent / "templates"))
 
 _AUTH_SKEW_SECONDS = 300
+_DEFAULT_LEASE_WINDOW = 7 * 24 * 3600
+
+
+def lease_window_seconds() -> int:
+    raw = (os.environ.get("KBOND_LEASE_TTL_SECONDS") or "").strip()
+    if not raw:
+        return _DEFAULT_LEASE_WINDOW
+    try:
+        value = int(raw)
+    except ValueError:
+        return _DEFAULT_LEASE_WINDOW
+    return value if value > 0 else _DEFAULT_LEASE_WINDOW
+
+
+def compute_lease_expires_at(now: float, pilot_expires_at: float, ttl: Optional[int] = None) -> float:
+    window = float(ttl if ttl is not None else lease_window_seconds())
+    return min(now + window, float(pilot_expires_at))
 
 
 def _connect() -> sqlite3.Connection:
@@ -37,6 +55,7 @@ def _migrate(conn: sqlite3.Connection) -> None:
         ("activated", "INTEGER NOT NULL DEFAULT 0"),
         ("last_lease_at", "REAL"),
         ("last_audit_at", "REAL"),
+        ("pilot_expires_at", "REAL"),
     ]
     for name, decl in alters:
         if name not in cols:
@@ -74,7 +93,8 @@ def init_db() -> None:
               enabled INTEGER NOT NULL DEFAULT 1,
               activated INTEGER NOT NULL DEFAULT 0,
               last_lease_at REAL,
-              last_audit_at REAL
+              last_audit_at REAL,
+              pilot_expires_at REAL
             );
             CREATE TABLE IF NOT EXISTS audit_events (
               event_id TEXT PRIMARY KEY,
@@ -87,6 +107,22 @@ def init_db() -> None:
             """
         )
         _migrate(conn)
+
+
+def _ensure_pilot_expires_at(
+    conn: sqlite3.Connection, device_id: str, existing: Optional[sqlite3.Row]
+) -> float:
+    """Set pilot_expires_at once on first register/lease; never extend."""
+    now = time.time()
+    if existing is not None and existing["pilot_expires_at"]:
+        return float(existing["pilot_expires_at"])
+    expires = now + lease_window_seconds()
+    conn.execute(
+        "UPDATE machines SET pilot_expires_at=? WHERE device_id=? AND "
+        "(pilot_expires_at IS NULL OR pilot_expires_at=0)",
+        (expires, device_id),
+    )
+    return expires
 
 
 def _touch_seen(
@@ -187,15 +223,21 @@ def create_app() -> FastAPI:
                 activated = int(existing["activated"])
             if existing is None:
                 activated = 1
+            pilot_expires = None
+            if existing is not None and existing["pilot_expires_at"]:
+                pilot_expires = float(existing["pilot_expires_at"])
+            elif existing is None:
+                pilot_expires = time.time() + lease_window_seconds()
             conn.execute(
                 "INSERT INTO machines(device_id, machine_id, trader_id, last_seen, engine_version, "
-                "credential_hash, credential_protection, enabled, activated) "
-                "VALUES(?,?,?,?,?,?,?,?,?) "
+                "credential_hash, credential_protection, enabled, activated, pilot_expires_at) "
+                "VALUES(?,?,?,?,?,?,?,?,?,?) "
                 "ON CONFLICT(device_id) DO UPDATE SET "
                 "machine_id=excluded.machine_id, trader_id=excluded.trader_id, "
                 "last_seen=excluded.last_seen, engine_version=excluded.engine_version, "
                 "credential_hash=excluded.credential_hash, "
-                "credential_protection=excluded.credential_protection",
+                "credential_protection=excluded.credential_protection, "
+                "pilot_expires_at=COALESCE(machines.pilot_expires_at, excluded.pilot_expires_at)",
                 (
                     device_id,
                     machine_id,
@@ -206,8 +248,14 @@ def create_app() -> FastAPI:
                     protection,
                     1,
                     activated,
+                    pilot_expires,
                 ),
             )
+            # Backfill absolute window for legacy rows missing pilot_expires_at
+            row_full = conn.execute(
+                "SELECT * FROM machines WHERE device_id=?", (device_id,)
+            ).fetchone()
+            pilot_expires_at = _ensure_pilot_expires_at(conn, device_id, row_full)
             if trader_id:
                 conn.execute(
                     "INSERT INTO traders(trader_id, updated_at) VALUES(?,?) "
@@ -215,7 +263,8 @@ def create_app() -> FastAPI:
                     (trader_id, time.time()),
                 )
             row = conn.execute(
-                "SELECT activated, enabled, credential_protection FROM machines WHERE device_id=?",
+                "SELECT activated, enabled, credential_protection, pilot_expires_at "
+                "FROM machines WHERE device_id=?",
                 (device_id,),
             ).fetchone()
         return {
@@ -223,6 +272,7 @@ def create_app() -> FastAPI:
             "activated": bool(row["activated"]),
             "enabled": bool(row["enabled"]),
             "credential_protection": row["credential_protection"],
+            "pilot_expires_at": row["pilot_expires_at"] or pilot_expires_at,
         }
 
     @app.get("/api/devices/{device_id}/policy")
@@ -278,18 +328,24 @@ def create_app() -> FastAPI:
                 # Prefer Admin signed profile version when present
                 if row["profile_json"]:
                     profile_version = int(row["profile_version"])
+            now = time.time()
+            pilot_expires_at = _ensure_pilot_expires_at(conn, device["device_id"], device)
+            if now > float(pilot_expires_at):
+                raise HTTPException(403, "pilot window expired; lease reissue refused")
+            expires_at = compute_lease_expires_at(now, pilot_expires_at)
             payload = {
                 "device_id": device["device_id"],
                 "trader_id": trader_id,
                 "profile_version": profile_version,
                 "min_engine_version": min_engine,
-                "expires_at": time.time() + 3600,
+                "expires_at": expires_at,
                 "enabled": not disabled,
             }
             payload["signature"] = admin_sign_payload(
                 {k: v for k, v in payload.items() if k != "signature"}
             )
             payload["machine_id"] = device["machine_id"] or data.get("machine_id") or ""
+            payload["pilot_expires_at"] = pilot_expires_at
             conn.execute(
                 "UPDATE machines SET last_lease_at=?, last_seen=?, trader_id=?, "
                 "credential_protection=COALESCE(?, credential_protection) WHERE device_id=?",

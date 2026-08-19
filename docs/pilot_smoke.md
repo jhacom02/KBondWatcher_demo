@@ -3,14 +3,17 @@
 # Build / mode
 # [ ] Source: KBOND_DEPLOY_MODE unset → deploy_mode=dev
 # [ ] Frozen/Nuitka: deploy_mode=pilot even if KBOND_DEPLOY_MODE=dev
-# [ ] Nuitka onefolder: VERSION.txt + demo_expiry.txt present; no .py left in dist
+# [ ] Nuitka onefolder: VERSION.txt + demo_expiry.txt (build+7d); no .py; no admin.db in dist
+# [ ] start.bat present; replace KBOND_ADMIN_URL + KBOND_SIGNING_PUBLIC_KEY before zip
 #
 # Credential / lease / profile
 # [ ] device.json has credential_blob + credential_protection=dpapi (no plaintext credential)
 # [ ] Dev: local issue_lease works; Pilot: local issue_lease raises
+# [ ] Lease TTL default 7d; Admin refuses reissue after pilot_expires_at (absolute window)
 # [ ] Lease binds device_id+trader_id+profile_version+min_engine+expires_at+enabled (no exact engine_version)
 # [ ] Profile: Local Web saves draft only when Admin URL set; submit → Admin approve → apply
 # [ ] Tampered profile.json or .sig fails START + PROFILE_REJECTED / LICENSE_REJECTED audit
+# [ ] Past demo_expiry.txt date blocks START / policy poll soft STOP
 #
 # Controller policy poll (not in Quote→Excel→Send)
 # [ ] START with valid signed profile + lease
@@ -20,7 +23,7 @@
 #
 # Admin remote
 # [ ] KBOND_ADMIN_URL HTTPS in pilot; device register + HMAC auth
-# [ ] UI shows last_seen / last_lease / last_audit / credential_protection / disable
+# [ ] UI shows last_seen / last_lease / last_audit / pilot_expires / credential_protection / disable
 # [ ] Audit ingest UNIQUE event_id; duplicates counted; client retries + stale status visible
 #
 # Runtime regression

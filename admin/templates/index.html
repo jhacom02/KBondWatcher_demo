@@ -61,6 +61,7 @@
       <th>last_seen</th>
       <th>last_lease</th>
       <th>last_audit</th>
+      <th>pilot_expires</th>
       <th>disable</th>
     </tr>
     {% for m in machines %}
@@ -75,6 +76,7 @@
       <td>{{ m['last_seen'] }}</td>
       <td>{{ m['last_lease_at'] }}</td>
       <td>{{ m['last_audit_at'] }}</td>
+      <td>{{ m['pilot_expires_at'] }}</td>
       <td>
         <button type="button" onclick="toggleDevice('{{ m['device_id'] }}', {{ 0 if m['enabled'] else 1 }})">
           {{ 'Disable' if m['enabled'] else 'Enable' }}

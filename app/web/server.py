@@ -38,7 +38,7 @@ from app.license import (
 )
 from app.machine import load_or_create_machine, save_machine
 from app.paths import audit_cursor_path, local_token_path
-from app.policy_poll import start_policy_poller
+from app.policy_poll import get_last_profile_sync, start_policy_poller
 from app.profile import (
     ProfileError,
     TraderProfile,
@@ -129,6 +129,7 @@ def create_app() -> FastAPI:
             **status.to_dict(),
             "deploy_mode": "pilot" if is_pilot() else "dev",
             "audit_upload": read_audit_upload_status(),
+            "profile_sync": get_last_profile_sync(),
         }
 
     @app.get("/api/workbooks")

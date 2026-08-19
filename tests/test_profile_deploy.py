@@ -256,3 +256,82 @@ def test_apply_signed_profile(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -
     apply_signed_profile(profile, sig)
     assert load_profile().profile_version == 2
     assert load_profile_signature()
+
+
+def test_demo_expiry_future_ok(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from datetime import date
+
+    from app.demo_expiry import check_demo_expiry
+
+    expiry = tmp_path / "demo_expiry.txt"
+    expiry.write_text("2099-01-01\n", encoding="utf-8")
+    monkeypatch.setattr(
+        "app.demo_expiry.demo_expiry_candidates", lambda: [expiry]
+    )
+    monkeypatch.setenv("KBOND_DEPLOY_MODE", "pilot")
+    from app import deploy_mode
+
+    monkeypatch.setattr(deploy_mode, "is_frozen_binary", lambda: False)
+    monkeypatch.setattr(deploy_mode, "DEPLOY_MODE_BUILD", None)
+    check_demo_expiry(today=date(2098, 12, 31))
+
+
+def test_demo_expiry_past_raises(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from datetime import date
+
+    from app.demo_expiry import check_demo_expiry
+
+    expiry = tmp_path / "demo_expiry.txt"
+    expiry.write_text("2020-01-01\n", encoding="utf-8")
+    monkeypatch.setattr(
+        "app.demo_expiry.demo_expiry_candidates", lambda: [expiry]
+    )
+    monkeypatch.setenv("KBOND_DEPLOY_MODE", "dev")
+    from app import deploy_mode
+
+    monkeypatch.setattr(deploy_mode, "is_frozen_binary", lambda: False)
+    monkeypatch.setattr(deploy_mode, "DEPLOY_MODE_BUILD", None)
+    with pytest.raises(LicenseError, match="demo expired"):
+        check_demo_expiry(today=date(2020, 1, 2))
+
+
+def test_demo_expiry_missing_pilot_fail_closed(monkeypatch: pytest.MonkeyPatch) -> None:
+    from app.demo_expiry import check_demo_expiry
+    from app import deploy_mode
+
+    monkeypatch.setattr("app.demo_expiry.demo_expiry_candidates", lambda: [])
+    monkeypatch.setattr(deploy_mode, "is_frozen_binary", lambda: False)
+    monkeypatch.setattr(deploy_mode, "DEPLOY_MODE_BUILD", "pilot")
+    monkeypatch.setenv("KBOND_DEPLOY_MODE", "dev")
+    with pytest.raises(LicenseError, match="missing"):
+        check_demo_expiry()
+
+
+def test_demo_expiry_missing_dev_ok(monkeypatch: pytest.MonkeyPatch) -> None:
+    from app.demo_expiry import check_demo_expiry
+    from app import deploy_mode
+
+    monkeypatch.setattr("app.demo_expiry.demo_expiry_candidates", lambda: [])
+    monkeypatch.setattr(deploy_mode, "is_frozen_binary", lambda: False)
+    monkeypatch.setattr(deploy_mode, "DEPLOY_MODE_BUILD", None)
+    monkeypatch.setenv("KBOND_DEPLOY_MODE", "dev")
+    check_demo_expiry()
+
+
+def test_compute_lease_expires_clamped_to_pilot_window() -> None:
+    from admin.server import compute_lease_expires_at
+
+    now = 1_000_000.0
+    pilot_end = now + 100
+    # TTL larger than remaining window → clamp
+    assert compute_lease_expires_at(now, pilot_end, ttl=7 * 24 * 3600) == pilot_end
+    assert compute_lease_expires_at(now, now + 10_000_000, ttl=60) == now + 60
+
+
+def test_start_bat_exists() -> None:
+    path = ROOT / "build" / "start.bat"
+    assert path.is_file()
+    text = path.read_text(encoding="utf-8")
+    assert "KBOND_ADMIN_URL" in text
+    assert "main.exe --serve" in text
+    assert "127.0.0.1:8765" in text
