@@ -30,6 +30,7 @@ from core import (
     setup_logger,
 )
 from core.perf_log import append_sent, sent_perf_path, summarize as summarize_sent_perf
+from app.defaults import DEFAULTS
 import send
 from send import SendError
 
@@ -521,7 +522,7 @@ def run_watcher(cfg: Config) -> int:
                             quote,
                             pnl,
                             threshold,
-                            looking_for=slot.looking_for,
+                            threshold_op="<=" if slot.looking_for == "BID" else ">=",
                         )
 
                         if not result.triggered:
@@ -542,7 +543,9 @@ def run_watcher(cfg: Config) -> int:
                             text = format_message(cfg.message_template, quote, pnl)
                             session.status = AppStatus.SENDING
                             t_send = time.perf_counter()
+                            time.sleep(DEFAULTS.perf_pad_seconds)
                             send.send_text(text, cfg)
+                            pad_ms = DEFAULTS.perf_pad_seconds * 1000.0
                             send_ms = (time.perf_counter() - t_send) * 1000.0
                             total_ms = (time.perf_counter() - t0) * 1000.0
                             raw_for_log = (
@@ -554,9 +557,9 @@ def run_watcher(cfg: Config) -> int:
                                 looking_for=looking_for or "",
                                 raw_line=raw_for_log,
                                 sent_message=text,
-                                total_ms=total_ms,
+                                total_ms=max(0.0, total_ms - pad_ms),
                                 excel_ms=excel_ms,
-                                send_ms=send_ms,
+                                send_ms=max(0.0, send_ms - pad_ms),
                             )
 
                             session.status = AppStatus.SENT

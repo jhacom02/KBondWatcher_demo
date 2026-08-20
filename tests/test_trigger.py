@@ -36,17 +36,17 @@ def test_looking_for_from_qty() -> None:
         looking_for_from_qty(80.5)
 
 
-def test_evaluate_bid_positive_threshold() -> None:
+def test_evaluate_le() -> None:
     quote = Quote("25-11", "25-11 23+", "23+", 4.23, "BUY")
-    assert evaluate(quote, 100_000, 100_000, "BID").triggered is True
-    assert evaluate(quote, 200_000, 100_000, "BID").triggered is False
-    assert evaluate(quote, -2_000_000, 100_000, "BID").triggered is True
+    assert evaluate(quote, 100_000, 100_000, "<=").triggered is True
+    assert evaluate(quote, 200_000, 100_000, "<=").triggered is False
+    assert evaluate(quote, -2_000_000, 100_000, "<=").triggered is True
 
 
-def test_evaluate_bid_negative_threshold() -> None:
+def test_evaluate_le_negative_threshold() -> None:
     quote = Quote("25-11", "25-11 23+", "23+", 4.23, "BUY")
-    assert evaluate(quote, -2_000_000, -2_000_000, "BID").triggered is True
-    assert evaluate(quote, -1_000_000, -2_000_000, "BID").triggered is False
+    assert evaluate(quote, -2_000_000, -2_000_000, "<=").triggered is True
+    assert evaluate(quote, -1_000_000, -2_000_000, "<=").triggered is False
 
 
 def test_pnl_outside_sanity_band() -> None:
@@ -56,11 +56,11 @@ def test_pnl_outside_sanity_band() -> None:
     assert pnl_outside_sanity_band(-2146826273, -80, 5_000_000) is True
 
 
-def test_evaluate_offer() -> None:
+def test_evaluate_ge() -> None:
     quote = Quote("25-11", "25-11 23-", "23-", 4.23, "SELL")
-    assert evaluate(quote, 1_500_000, 1_000_000, "OFFER").triggered is True
-    assert evaluate(quote, 1_000_000, 1_000_000, "OFFER").triggered is True
-    assert evaluate(quote, 500_000, 1_000_000, "OFFER").triggered is False
+    assert evaluate(quote, 1_500_000, 1_000_000, ">=").triggered is True
+    assert evaluate(quote, 1_000_000, 1_000_000, ">=").triggered is True
+    assert evaluate(quote, 500_000, 1_000_000, ">=").triggered is False
 
 
 def test_flip_side_token() -> None:

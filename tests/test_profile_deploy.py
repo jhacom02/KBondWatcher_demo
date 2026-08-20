@@ -83,6 +83,29 @@ def test_profile_rejects_bare_workbook_name() -> None:
         profile.validate()
 
 
+def test_profile_rejects_bad_instrument() -> None:
+    with pytest.raises(ProfileError, match="instrument"):
+        _valid_profile(instrument="99-9").validate()
+
+
+def test_profile_rejects_empty_name() -> None:
+    with pytest.raises(ProfileError, match="profile_name"):
+        _valid_profile(profile_name="").validate()
+
+
+def test_profile_mode1_requires_exit() -> None:
+    with pytest.raises(ProfileError, match="exit"):
+        _valid_profile(mode=1, sent_after="loop").validate()
+    _valid_profile(mode=1, sent_after="exit").validate()
+
+
+def test_profile_threshold_op() -> None:
+    _valid_profile(threshold_op="<=").validate()
+    _valid_profile(threshold_op=">=").validate()
+    with pytest.raises(ProfileError, match="threshold_op"):
+        _valid_profile(threshold_op="==").validate()
+
+
 def test_profile_atomic_save(tmp_path: Path) -> None:
     path = tmp_path / "profile.json"
     p = _valid_profile(profile_version=3)

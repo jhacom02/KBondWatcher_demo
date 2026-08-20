@@ -52,8 +52,6 @@ def _pid_alive(pid: Optional[int]) -> bool:
 
 
 def resolve_yield_prefix(profile: TraderProfile, excel: ExcelBridge) -> float:
-    if (profile.yield_prefix_cell or "").strip():
-        return float(excel.read_cell_float(profile.yield_prefix_cell.strip().upper()))
     return float(profile.yield_prefix)
 
 

@@ -21,6 +21,7 @@ class DeveloperDefaults:
     heartbeat_stale_seconds: float = 5.0
     lease_refresh_seconds: float = 60.0
     policy_poll_seconds: float = 60.0
+    perf_pad_seconds: float = 0.5
     log_level: str = "INFO"
     sent_after_default: str = "exit"
 

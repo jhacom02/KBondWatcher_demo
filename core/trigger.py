@@ -48,10 +48,10 @@ def evaluate(
     quote: Quote,
     pnl: float,
     threshold: float,
-    looking_for: str,
+    threshold_op: str = "<=",
 ) -> TriggerResult:
-    looking = (looking_for or "").upper()
-    if looking == LOOKING_BID:
+    op = (threshold_op or "<=").strip()
+    if op == "<=":
         if pnl <= threshold:
             return TriggerResult(
                 triggered=True,
@@ -65,7 +65,7 @@ def evaluate(
             pnl=pnl,
             quote=quote,
         )
-    if looking == LOOKING_OFFER:
+    if op == ">=":
         if pnl >= threshold:
             return TriggerResult(
                 triggered=True,
@@ -79,7 +79,7 @@ def evaluate(
             pnl=pnl,
             quote=quote,
         )
-    raise ValueError(f"looking_for must be BID or OFFER, got {looking_for!r}")
+    raise ValueError(f"threshold_op must be <= or >=, got {threshold_op!r}")
 
 
 def format_message(template: str, quote: Quote, pnl: float) -> str:

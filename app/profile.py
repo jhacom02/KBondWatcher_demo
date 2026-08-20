@@ -11,6 +11,8 @@ from .paths import profile_draft_path, profile_path
 from .side_map import normalize_looking_for
 
 _CELL_RE = re.compile(r"^[A-Za-z]{1,3}\d{1,7}$")
+ALLOWED_INSTRUMENTS = frozenset({"25-10", "25-4", "25-8", "25-5", "25-11"})
+THRESHOLD_OPS = frozenset({"<=", ">="})
 
 
 class ProfileError(ValueError):
@@ -19,7 +21,7 @@ class ProfileError(ValueError):
 
 @dataclass
 class TraderProfile:
-    profile_name: str = "default"
+    profile_name: str = ""
     profile_version: int = 1
     profile_schema_version: int = PROFILE_SCHEMA_VERSION
     trader_id: str = ""
@@ -27,14 +29,15 @@ class TraderProfile:
     looking_for: str = "BID"
     required_qty: int = 100
     threshold: float = 0.0
+    threshold_op: str = "<="
     excel_workbook: str = ""
     excel_sheet: str = ""
     yield_input_cell: str = ""
     pnl_cell: str = ""
-    yield_prefix: float = 0.0
+    yield_prefix: float = 3.0
     yield_prefix_cell: str = ""
-    mode: int = 1
-    kbond_chat_title: str = ""
+    mode: int = 2
+    kbond_chat_title: str = "[채권] 블커본드"
     sent_after: str = "exit"
     message_template: str = "{instrument} {confirm_token} ㅎㅈ"
 
@@ -46,8 +49,9 @@ class TraderProfile:
             )
         if not (self.profile_name or "").strip():
             raise ProfileError("profile_name is required")
-        if not (self.instrument or "").strip():
-            raise ProfileError("instrument is required")
+        inst = (self.instrument or "").strip()
+        if inst not in ALLOWED_INSTRUMENTS:
+            raise ProfileError(f"instrument must be one of {sorted(ALLOWED_INSTRUMENTS)}")
         normalize_looking_for(self.looking_for)
         if int(self.required_qty) <= 0:
             raise ProfileError("required_qty must be > 0")
@@ -55,6 +59,9 @@ class TraderProfile:
             float(self.threshold)
         except (TypeError, ValueError) as exc:
             raise ProfileError("threshold must be numeric") from exc
+        op = (self.threshold_op or "").strip()
+        if op not in THRESHOLD_OPS:
+            raise ProfileError("threshold_op must be <= or >=")
         if not (self.excel_workbook or "").strip():
             raise ProfileError("excel_workbook FullName is required")
         if "\\" not in self.excel_workbook and "/" not in self.excel_workbook:
@@ -67,11 +74,6 @@ class TraderProfile:
             cell = getattr(self, key)
             if not _CELL_RE.match((cell or "").strip()):
                 raise ProfileError(f"{key} must be a cell like D19, got {cell!r}")
-        if self.yield_prefix_cell:
-            if not _CELL_RE.match(self.yield_prefix_cell.strip()):
-                raise ProfileError(
-                    f"yield_prefix_cell must be a cell like B5, got {self.yield_prefix_cell!r}"
-                )
         mode = int(self.mode)
         if mode not in (1, 2, 3):
             raise ProfileError("mode must be 1, 2, or 3")
@@ -80,6 +82,8 @@ class TraderProfile:
         sent = (self.sent_after or "").strip().lower()
         if sent not in {"exit", "loop"}:
             raise ProfileError("sent_after must be exit or loop")
+        if mode == 1 and sent != "exit":
+            raise ProfileError("sent_after must be exit when mode is 1")
         if not (self.message_template or "").strip():
             raise ProfileError("message_template is required")
 
@@ -107,10 +111,7 @@ def load_profile(path: Optional[Path] = None) -> TraderProfile:
     target = path or profile_path()
     if not target.is_file():
         raise ProfileError(f"profile not found: {target}")
-    try:
-        data = json.loads(target.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError) as exc:
-        raise ProfileError(f"failed to read profile: {exc}") from exc
+    data = json.loads(target.read_text(encoding="utf-8"))
     if not isinstance(data, dict):
         raise ProfileError("profile must be a JSON object")
     profile = TraderProfile.from_dict(data)
@@ -128,13 +129,11 @@ def save_profile(profile: TraderProfile, path: Optional[Path] = None) -> TraderP
 
 
 def save_profile_raw(profile: TraderProfile, path: Optional[Path] = None) -> None:
-    """Save without auto-bumping version (e.g. after admin sync)."""
     profile.validate()
     _atomic_write_json(path or profile_path(), profile.to_dict())
 
 
 def save_profile_draft(profile: TraderProfile) -> TraderProfile:
-    """Local draft only — does not become active signed profile."""
     profile.validate()
     draft = TraderProfile(
         **{**profile.to_dict(), "profile_version": int(profile.profile_version)}

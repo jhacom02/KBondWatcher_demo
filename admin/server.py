@@ -6,17 +6,20 @@ import json
 import os
 import sqlite3
 import time
+from datetime import datetime
 from pathlib import Path
 from typing import Any, Optional
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import HTMLResponse
+from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
 from app import ENGINE_VERSION
 from app.crypto_sign import admin_sign_payload, export_public_key_b64
 
 DB_PATH = Path(__file__).resolve().parent / "admin.db"
+STATIC_DIR = Path(__file__).resolve().parent / "static"
 TEMPLATES = Jinja2Templates(directory=str(Path(__file__).parent / "templates"))
 
 _AUTH_SKEW_SECONDS = 300
@@ -37,6 +40,62 @@ def lease_window_seconds() -> int:
 def compute_lease_expires_at(now: float, pilot_expires_at: float, ttl: Optional[int] = None) -> float:
     window = float(ttl if ttl is not None else lease_window_seconds())
     return min(now + window, float(pilot_expires_at))
+
+
+def fmt_ts(ts: Any) -> str:
+    if ts is None or ts == "":
+        return "—"
+    try:
+        value = float(ts)
+    except (TypeError, ValueError):
+        return str(ts)
+    return datetime.fromtimestamp(value).strftime("%Y-%m-%d %H:%M")
+
+
+def fmt_pilot_expires(ts: Any, *, now: Optional[float] = None) -> str:
+    base = fmt_ts(ts)
+    if base == "—":
+        return base
+    try:
+        expires = float(ts)
+    except (TypeError, ValueError):
+        return base
+    current = time.time() if now is None else float(now)
+    remaining = expires - current
+    if remaining <= 0:
+        return f"{base} (expired)"
+    days = int(remaining // 86400)
+    return f"{base} ({days}d left)"
+
+
+def _row_dict(row: sqlite3.Row) -> dict[str, Any]:
+    return {k: row[k] for k in row.keys()}
+
+
+def _trader_view(row: sqlite3.Row) -> dict[str, Any]:
+    data = _row_dict(row)
+    data["updated_display"] = fmt_ts(data.get("updated_at"))
+    data["has_signed"] = bool(data.get("profile_signature"))
+    data["has_draft"] = bool(data.get("draft_json"))
+    data["is_disabled"] = bool(data.get("disabled"))
+    return data
+
+
+def _machine_view(row: sqlite3.Row, *, now: Optional[float] = None) -> dict[str, Any]:
+    data = _row_dict(row)
+    current = time.time() if now is None else float(now)
+    data["last_seen_display"] = fmt_ts(data.get("last_seen"))
+    data["last_lease_display"] = fmt_ts(data.get("last_lease_at"))
+    data["last_audit_display"] = fmt_ts(data.get("last_audit_at"))
+    data["pilot_expires_display"] = fmt_pilot_expires(data.get("pilot_expires_at"), now=current)
+    data["is_enabled"] = bool(data.get("enabled"))
+    data["is_activated"] = bool(data.get("activated"))
+    pilot = data.get("pilot_expires_at")
+    try:
+        data["pilot_expired"] = pilot is not None and float(pilot) <= current
+    except (TypeError, ValueError):
+        data["pilot_expired"] = False
+    return data
 
 
 def _connect() -> sqlite3.Connection:
@@ -177,12 +236,21 @@ def _verify_device_auth(request: Request, conn: sqlite3.Connection) -> sqlite3.R
 def create_app() -> FastAPI:
     init_db()
     app = FastAPI(title="KBondWatcher Admin")
+    app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 
     @app.get("/", response_class=HTMLResponse)
     async def home(request: Request):
         with _connect() as conn:
-            traders = conn.execute("SELECT * FROM traders ORDER BY trader_id").fetchall()
-            machines = conn.execute("SELECT * FROM machines ORDER BY last_seen DESC").fetchall()
+            traders = [
+                _trader_view(r)
+                for r in conn.execute("SELECT * FROM traders ORDER BY trader_id").fetchall()
+            ]
+            machines = [
+                _machine_view(r)
+                for r in conn.execute(
+                    "SELECT * FROM machines ORDER BY last_seen DESC"
+                ).fetchall()
+            ]
             audits = conn.execute(
                 "SELECT * FROM audit_events ORDER BY timestamp DESC LIMIT 100"
             ).fetchall()
@@ -320,12 +388,16 @@ def create_app() -> FastAPI:
                 row = conn.execute(
                     "SELECT * FROM traders WHERE trader_id=?", (trader_id,)
                 ).fetchone()
-            disabled = bool(row["disabled"]) or not bool(device["enabled"])
+            if bool(row["disabled"]):
+                raise HTTPException(403, "trader disabled")
+            if not bool(device["enabled"]):
+                raise HTTPException(403, "device disabled")
+            if not row["profile_json"] or not row["profile_signature"]:
+                raise HTTPException(403, "signed profile required")
             min_engine = row["min_engine_version"] or "0.1.0"
             if profile_version <= 0:
                 profile_version = int(row["profile_version"] or 1)
             if row["profile_version"] and int(row["profile_version"]) > 0:
-                # Prefer Admin signed profile version when present
                 if row["profile_json"]:
                     profile_version = int(row["profile_version"])
             now = time.time()
@@ -339,7 +411,7 @@ def create_app() -> FastAPI:
                 "profile_version": profile_version,
                 "min_engine_version": min_engine,
                 "expires_at": expires_at,
-                "enabled": not disabled,
+                "enabled": True,
             }
             payload["signature"] = admin_sign_payload(
                 {k: v for k, v in payload.items() if k != "signature"}
@@ -404,6 +476,22 @@ def create_app() -> FastAPI:
                 ),
             )
         return {"ok": True, "profile_version": version, "signature": signature, "profile": profile}
+
+    @app.post("/api/traders/{trader_id}/revoke-profile")
+    async def api_revoke_profile(trader_id: str):
+        with _connect() as conn:
+            row = conn.execute(
+                "SELECT profile_signature FROM traders WHERE trader_id=?",
+                (trader_id,),
+            ).fetchone()
+            if not row or not row["profile_signature"]:
+                raise HTTPException(404, "signed profile not found")
+            conn.execute(
+                "UPDATE traders SET profile_json=NULL, profile_signature=NULL, updated_at=? "
+                "WHERE trader_id=?",
+                (time.time(), trader_id),
+            )
+        return {"ok": True, "trader_id": trader_id}
 
     @app.get("/api/profile/current")
     async def api_profile_current(request: Request, trader_id: str = ""):

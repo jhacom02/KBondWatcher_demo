@@ -10,6 +10,7 @@ from typing import Any, Optional
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from starlette.middleware.sessions import SessionMiddleware
 
@@ -51,6 +52,7 @@ from app.profile import (
 from app.runtime_status import read_runtime_status
 
 TEMPLATES = Jinja2Templates(directory=str(Path(__file__).parent / "templates"))
+STATIC_DIR = Path(__file__).parent / "static"
 
 
 def _load_or_create_token() -> str:
@@ -68,6 +70,7 @@ LOCAL_TOKEN = _load_or_create_token()
 
 def create_app() -> FastAPI:
     app = FastAPI(docs_url=None, redoc_url=None)
+    app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
     app.add_middleware(
         SessionMiddleware,
         secret_key=LOCAL_TOKEN,
@@ -104,7 +107,7 @@ def create_app() -> FastAPI:
             try:
                 profile = load_profile_draft()
             except ProfileError:
-                profile = TraderProfile(profile_name="default", trader_id="trader")
+                profile = TraderProfile()
         status = read_runtime_status()
         return TEMPLATES.TemplateResponse(
             request,
@@ -115,18 +118,27 @@ def create_app() -> FastAPI:
                 "status": status,
                 "engine_version": ENGINE_VERSION,
                 "token": LOCAL_TOKEN,
-                "workbooks": [],
                 "message": request.query_params.get("msg", ""),
                 "deploy_mode": "pilot" if is_pilot() else "dev",
-                "audit_upload": read_audit_upload_status(),
             },
         )
 
     @app.get("/api/status")
     async def api_status():
         status = read_runtime_status()
+        threshold_op = "<="
+        try:
+            active = load_profile()
+            threshold_op = active.threshold_op or "<="
+        except ProfileError:
+            try:
+                draft = load_profile_draft()
+                threshold_op = draft.threshold_op or "<="
+            except ProfileError:
+                pass
         return {
             **status.to_dict(),
+            "threshold_op": threshold_op,
             "deploy_mode": "pilot" if is_pilot() else "dev",
             "audit_upload": read_audit_upload_status(),
             "profile_sync": get_last_profile_sync(),
@@ -143,21 +155,44 @@ def create_app() -> FastAPI:
 
     @app.post("/api/profile")
     async def api_profile_save(request: Request):
-        """Save local draft. Pilot does not auto-apply; use submit + apply."""
         _require_stopped()
         data = await request.json()
         try:
             existing = load_profile()
             version = existing.profile_version
+            prev_template = existing.message_template
         except ProfileError:
             version = 0
-        profile = TraderProfile.from_dict({**data, "profile_version": version})
+            prev_template = "{instrument} {confirm_token} ㅎㅈ"
+        name = str(data.get("profile_name") or "").strip()
+        payload = {
+            **data,
+            "profile_version": version,
+            "profile_name": name,
+            "trader_id": name,
+            "message_template": data.get("message_template") or prev_template,
+            "yield_prefix_cell": "",
+        }
+        if int(payload.get("mode") or 0) == 1:
+            payload["sent_after"] = "exit"
+        profile = TraderProfile.from_dict(payload)
         try:
             draft = save_profile_draft(profile)
         except ProfileError as exc:
             raise HTTPException(400, str(exc)) from exc
 
         machine = load_or_create_machine()
+        if "send_input_x" in data or "send_input_y" in data:
+            try:
+                if "send_input_x" in data:
+                    machine.send_input_x = float(data["send_input_x"])
+                if "send_input_y" in data:
+                    machine.send_input_y = float(data["send_input_y"])
+                machine.validate()
+                save_machine(machine)
+            except Exception as exc:
+                raise HTTPException(400, str(exc)) from exc
+
         append_audit(
             "PROFILE_SAVED",
             {
@@ -169,7 +204,6 @@ def create_app() -> FastAPI:
             },
         )
 
-        # Dev without Admin: allow local activate + sign for smoke.
         admin_url = (os.environ.get("KBOND_ADMIN_URL") or "").strip()
         if is_dev() and not admin_url:
             saved = save_profile(draft)
@@ -254,8 +288,11 @@ def create_app() -> FastAPI:
         _require_stopped()
         try:
             profile = load_profile()
-        except ProfileError as exc:
-            raise HTTPException(400, str(exc)) from exc
+        except ProfileError:
+            try:
+                profile = load_profile_draft()
+            except ProfileError as exc:
+                raise HTTPException(400, str(exc)) from exc
         machine = load_or_create_machine()
         cfg = config_from_profile(profile, machine)
         try:

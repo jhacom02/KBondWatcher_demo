@@ -8,6 +8,7 @@ from app import ENGINE_VERSION
 from app.adapter import config_from_profile, slot_from_profile
 from app.audit import append_audit
 from app.controller import resolve_yield_prefix
+from app.defaults import DEFAULTS
 from app.machine import load_or_create_machine
 from app.profile import load_profile
 from app.runtime_status import RuntimeStatus, write_runtime_status
@@ -181,10 +182,6 @@ def run_watcher_from_profile() -> int:
                     if stop_requested(cfg.stop_flag_path):
                         publish("STOPPED", last_action="Stopped")
                         return 0
-                    # refresh prefix optionally from cell
-                    if (profile.yield_prefix_cell or "").strip():
-                        prefix = resolve_yield_prefix(profile, excel)
-                        slot = slot_from_profile(profile, prefix)
                     log_new_source_lines(
                         log,
                         mode=cfg.mode,
@@ -232,7 +229,7 @@ def run_watcher_from_profile() -> int:
                             quote,
                             pnl,
                             threshold,
-                            looking_for=matched_slot.looking_for,
+                            threshold_op=(profile.threshold_op or "<="),
                         )
                         append_audit(
                             "TRIGGER_RESULT",
@@ -283,6 +280,7 @@ def run_watcher_from_profile() -> int:
                             )
                             t_send = time.perf_counter()
                             try:
+                                time.sleep(DEFAULTS.perf_pad_seconds)
                                 send.send_text(text, cfg)
                                 send_ok = True
                                 send_err = None
@@ -305,6 +303,7 @@ def run_watcher_from_profile() -> int:
                                     },
                                 )
                                 raise
+                            pad_ms = DEFAULTS.perf_pad_seconds * 1000.0
                             send_ms = (time.perf_counter() - t_send) * 1000.0
                             total_ms = (time.perf_counter() - t0) * 1000.0
                             raw_for_log = (
@@ -316,9 +315,9 @@ def run_watcher_from_profile() -> int:
                                 looking_for=looking_label,
                                 raw_line=raw_for_log,
                                 sent_message=text,
-                                total_ms=total_ms,
+                                total_ms=max(0.0, total_ms - pad_ms),
                                 excel_ms=excel_ms,
-                                send_ms=send_ms,
+                                send_ms=max(0.0, send_ms - pad_ms),
                             )
                             append_audit(
                                 "SEND_RESULT",

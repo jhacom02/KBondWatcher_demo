@@ -17,7 +17,7 @@ class MachineError(ValueError):
 class MachineCalibration:
     machine_id: str = ""
     send_input_x: float = 0.5
-    send_input_y: float = 0.5
+    send_input_y: float = 0.9
 
     def validate(self) -> None:
         if not (self.machine_id or "").strip():
