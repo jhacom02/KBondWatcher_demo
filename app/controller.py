@@ -35,6 +35,42 @@ from excel.bridge import workbook_identity
 from send import ensure_target_window
 from source import create_source_reader
 
+_watcher_job = None
+
+
+def _ensure_watcher_job() -> Any:
+    """Windows job so watcher dies when the serve process exits (console close)."""
+    global _watcher_job
+    if sys.platform != "win32":
+        return None
+    if _watcher_job is not None:
+        return _watcher_job
+    import win32job
+
+    job = win32job.CreateJobObject(None, "")
+    info = win32job.QueryInformationJobObject(job, win32job.JobObjectExtendedLimitInformation)
+    info["BasicLimitInformation"]["LimitFlags"] |= win32job.JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE
+    win32job.SetInformationJobObject(job, win32job.JobObjectExtendedLimitInformation, info)
+    _watcher_job = job
+    return job
+
+
+def _assign_watcher_to_job(pid: int) -> bool:
+    job = _ensure_watcher_job()
+    if job is None:
+        return False
+    import win32api
+    import win32con
+    import win32job
+
+    access = win32con.PROCESS_SET_QUOTA | win32con.PROCESS_TERMINATE
+    handle = win32api.OpenProcess(access, False, int(pid))
+    try:
+        win32job.AssignProcessToJobObject(job, handle)
+    finally:
+        win32api.CloseHandle(handle)
+    return True
+
 
 @dataclass
 class PreflightResult:
@@ -96,24 +132,6 @@ def preflight(profile: TraderProfile) -> PreflightResult:
     excel = ExcelBridge(
         workbook_name=cfg.excel_workbook,
         sheet_name=cfg.excel_sheet,
-        status_cell="",
-        looking_for_cell="",
-        last_quote_cell="",
-        last_pnl_cell="",
-        last_action_cell="",
-        watch_cell="",
-        pnl_threshold_cell="",
-        slot_rows=(0,),
-        rows_10y=(),
-        rows_3y=(),
-        prefix_3y_cell="",
-        prefix_10y_cell="",
-        instrument_col="A",
-        qty_col="E",
-        input_col="D",
-        pnl_col="F",
-        pnl_row_offset=0,
-        write_status_cells=False,
     )
     try:
         wb = bind_open_workbook(profile.excel_workbook)
@@ -246,11 +264,23 @@ def start_watcher_subprocess(python_exe: Optional[str] = None) -> PreflightResul
     )
 
     exe = python_exe or sys.executable
-    cmd = [exe, str(Path(__file__).resolve().parents[1] / "main.py"), "--run-profile"]
+    if getattr(sys, "frozen", False):
+        cmd = [exe, "--run-profile"]
+    else:
+        cmd = [exe, str(Path(__file__).resolve().parents[1] / "main.py"), "--run-profile"]
     creationflags = 0
     if sys.platform == "win32":
         creationflags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
-    proc = subprocess.Popen(cmd, cwd=str(Path(__file__).resolve().parents[1]), creationflags=creationflags)
+    proc = subprocess.Popen(
+        cmd,
+        cwd=str(Path(__file__).resolve().parents[1]),
+        creationflags=creationflags,
+    )
+    job_ok = False
+    try:
+        job_ok = _assign_watcher_to_job(proc.pid)
+    except Exception:
+        job_ok = False
     append_audit(
         "WATCHER_STARTED",
         {
@@ -265,7 +295,10 @@ def start_watcher_subprocess(python_exe: Optional[str] = None) -> PreflightResul
             "threshold": profile.threshold,
         },
     )
-    return PreflightResult(True, f"started pid={proc.pid}")
+    msg = f"started pid={proc.pid}"
+    if not job_ok:
+        msg += " · console-close kill unavailable"
+    return PreflightResult(True, msg)
 
 
 def stop_watcher(soft_wait_seconds: Optional[float] = None) -> PreflightResult:

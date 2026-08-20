@@ -15,7 +15,6 @@ from excel.bridge import (  # noqa: E402
     ExcelDisconnected,
     StopRequested,
     bind_slot_cells,
-    format_status,
     is_excel_busy,
     is_excel_gone,
     normalize_instrument,
@@ -28,7 +27,6 @@ from excel.bridge import (  # noqa: E402
     workbook_identity,
     workbook_matches_open,
 )
-from core.models import AppStatus  # noqa: E402
 
 
 def test_to_float_number() -> None:
@@ -123,12 +121,6 @@ def test_write_yield_read_pnl_timeout_on_cverr(monkeypatch: pytest.MonkeyPatch) 
         bridge.write_yield_read_pnl("D41", "F44", 3.7)
 
 
-def test_format_status() -> None:
-    assert format_status(AppStatus.SENT) == "SENT"
-    assert format_status("WATCHING") == "WATCHING"
-    assert format_status(AppStatus.EXCEL_WAIT) == "EXCEL_WAIT"
-
-
 def test_workbook_matches_absolute_full_name() -> None:
     cfg = r"C:\Users\Daily\daily.xlsm"
     assert workbook_matches_open(cfg, "daily.xlsm", r"C:\Users\Daily\daily.xlsm")
@@ -161,23 +153,6 @@ def _dummy_bridge() -> ExcelBridge:
     return ExcelBridge(
         workbook_name="sample.xlsm",
         sheet_name="트레이딩",
-        status_cell="F2",
-        looking_for_cell="G2",
-        last_quote_cell="H2",
-        last_pnl_cell="I2",
-        last_action_cell="J2",
-        watch_cell="D2",
-        pnl_threshold_cell="E2",
-        slot_rows=[19],
-        rows_10y=[19],
-        rows_3y=[41],
-        prefix_3y_cell="B5",
-        prefix_10y_cell="B6",
-        instrument_col="A",
-        qty_col="E",
-        input_col="D",
-        pnl_col="F",
-        pnl_row_offset=3,
     )
 
 

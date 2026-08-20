@@ -14,6 +14,7 @@
     <button type="button" class="btn btn-start" id="btnStart">START</button>
     <button type="button" class="btn btn-stop" id="btnStop">STOP</button>
   </div>
+  <p class="flash msg">탭을 닫거나 새로고침하면 감시가 중단됩니다.</p>
 
   <section class="section" id="sec-status">
     <h2>Status</h2>
@@ -346,11 +347,6 @@
           el.textContent = syncText;
           el.className = 'form-msg msg';
         }
-        if (s.profile_version != null) {
-          footer_meta.textContent =
-            `Engine ${s.engine_version || ''} · Machine {{ machine.machine_id }} · Mode ${modeEl.value}` +
-            ` · Profile_version ${s.profile_version} · Schema {{ profile.profile_schema_version }}`;
-        }
       } catch (e) {
         setVal('st_state', String(e));
       }
@@ -360,7 +356,6 @@
     const coordMode = document.getElementById('coord_mode');
     const clickWindow = document.getElementById('click_window');
     const position_check = document.getElementById('position_check');
-    const footer_meta = document.getElementById('footer_meta');
 
     [
       'looking_for', 'required_qty', 'threshold', 'threshold_op',
@@ -382,6 +377,19 @@
       catch (e) { formFlash('status', String(e), true); }
       refreshStatus();
     };
+
+    function stopWatcherBeacon() {
+      try {
+        fetch('/api/stop', {
+          method: 'POST',
+          headers: {'X-KBond-Token': TOKEN, 'Content-Type': 'application/json'},
+          body: '{}',
+          keepalive: true,
+        });
+      } catch (e) {}
+    }
+    window.addEventListener('pagehide', stopWatcherBeacon);
+    window.addEventListener('beforeunload', stopWatcherBeacon);
 
     document.getElementById('btnSaveProfile').onclick = async () => {
       const err = validateProfileClient();

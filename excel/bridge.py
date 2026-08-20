@@ -7,10 +7,7 @@ import re
 import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Callable, Optional, Sequence, TypeVar, Union
-
-from core.models import AppStatus
-from core.trigger import format_looking_for_label, looking_for_from_qty, qty_magnitude
+from typing import Any, Callable, Optional, Sequence, TypeVar
 
 logger = logging.getLogger("kbond_watcher")
 
@@ -164,12 +161,6 @@ def to_float(value: Any) -> float:
         return float(text)
     except ValueError as exc:
         raise ExcelBridgeError(f"cannot convert Excel value to float: {value!r}") from exc
-
-
-def format_status(status: Union[AppStatus, str]) -> str:
-    if isinstance(status, AppStatus):
-        return status.value
-    return str(status)
 
 
 def normalize_instrument(raw: Any) -> str:
@@ -406,47 +397,11 @@ class ExcelBridge:
         self,
         workbook_name: str,
         sheet_name: str,
-        status_cell: str,
-        looking_for_cell: str,
-        last_quote_cell: str,
-        last_pnl_cell: str,
-        last_action_cell: str,
-        watch_cell: str,
-        pnl_threshold_cell: str,
-        slot_rows: Sequence[int],
-        rows_10y: Sequence[int],
-        rows_3y: Sequence[int],
-        prefix_3y_cell: str,
-        prefix_10y_cell: str,
-        instrument_col: str,
-        qty_col: str,
-        input_col: str,
-        pnl_col: str,
-        pnl_row_offset: int,
         calc_wait_timeout_seconds: float = CALC_WAIT_TIMEOUT_SECONDS,
-        write_status_cells: bool = True,
     ) -> None:
         self.workbook_name = (workbook_name or "").strip()
         self.sheet_name = (sheet_name or "").strip()
-        self.status_cell = status_cell
-        self.looking_for_cell = looking_for_cell
-        self.last_quote_cell = last_quote_cell
-        self.last_pnl_cell = last_pnl_cell
-        self.last_action_cell = last_action_cell
-        self.watch_cell = watch_cell.strip()
-        self.pnl_threshold_cell = pnl_threshold_cell.strip()
-        self.slot_rows = [int(r) for r in slot_rows]
-        self.rows_10y = {int(r) for r in rows_10y}
-        self.rows_3y = {int(r) for r in rows_3y}
-        self.prefix_3y_cell = prefix_3y_cell
-        self.prefix_10y_cell = prefix_10y_cell
-        self.instrument_col = instrument_col.strip().upper()
-        self.qty_col = qty_col.strip().upper()
-        self.input_col = input_col.strip().upper()
-        self.pnl_col = pnl_col.strip().upper()
-        self.pnl_row_offset = int(pnl_row_offset)
         self.calc_wait_timeout_seconds = float(calc_wait_timeout_seconds)
-        self.write_status_cells = bool(write_status_cells)
         self._pythoncom: Any = None
         self._app: Any = None
         self._wb: Any = None
@@ -566,112 +521,6 @@ class ExcelBridge:
         finally:
             self.release_workbook()
 
-    def _yield_prefix_for_row(self, row: int, prefix_3y: float, prefix_10y: float) -> float:
-        if row in self.rows_10y:
-            return prefix_10y
-        if row in self.rows_3y:
-            return prefix_3y
-        raise ExcelBridgeError(f"row {row} is not mapped to 3Y or 10Y prefix band")
-
-    def load_slots(self) -> tuple[list[InstrumentSlot], str, float]:
-        self._ensure()
-        try:
-            return self._load_slots_connected()
-        finally:
-            self.release_workbook()
-
-    def _load_slots_connected(self) -> tuple[list[InstrumentSlot], str, float]:
-
-        def _read() -> tuple[Any, Any, Any, dict[int, Any], dict[int, Any], Any, Any]:
-            watch = self._ws.Range(self.watch_cell)
-            instruments: dict[int, Any] = {}
-            qtys: dict[int, Any] = {}
-            for row in self.slot_rows:
-                instruments[row] = self._ws.Range(
-                    f"{self.instrument_col}{row}"
-                ).Value
-                qtys[row] = self._ws.Range(f"{self.qty_col}{row}").Value
-            return (
-                watch.Formula,
-                watch.Value,
-                self._ws.Range(self.pnl_threshold_cell).Value,
-                instruments,
-                qtys,
-                self._ws.Range(self.prefix_3y_cell).Value,
-                self._ws.Range(self.prefix_10y_cell).Value,
-            )
-
-        (
-            formula,
-            value,
-            threshold_raw,
-            instruments,
-            qtys,
-            prefix_3y_raw,
-            prefix_10y_raw,
-        ) = self._call_excel(_read)
-        threshold = to_float(threshold_raw)
-        try:
-            prefix_3y = prefix_from_prev_yield(to_float(prefix_3y_raw))
-            prefix_10y = prefix_from_prev_yield(to_float(prefix_10y_raw))
-        except ExcelBridgeError as exc:
-            raise ExcelBridgeError(f"failed to read yield prefixes: {exc}") from exc
-
-        instruments_by_row = {
-            int(row): str(raw or "") for row, raw in instruments.items()
-        }
-        row = parse_watch_row(
-            formula,
-            value,
-            self.slot_rows,
-            instruments_by_row,
-            sheet_name=self.sheet_name,
-            instrument_col=self.instrument_col,
-            watch_cell=self.watch_cell,
-        )
-        instrument = normalize_instrument(instruments_by_row.get(row, ""))
-        if not instrument:
-            raise ExcelBridgeError(f"{self.instrument_col}{row} is empty")
-        try:
-            qty = to_float(qtys[row])
-            looking_for, required_side = looking_for_from_qty(qty)
-            qty_abs = qty_magnitude(qty)
-        except (ExcelBridgeError, ValueError) as exc:
-            raise ExcelBridgeError(
-                f"{self.qty_col}{row} must be a non-zero integer"
-            ) from exc
-        yield_prefix = self._yield_prefix_for_row(row, prefix_3y, prefix_10y)
-        input_cell, qty_cell, pnl_cell = bind_slot_cells(
-            row,
-            self.input_col,
-            self.qty_col,
-            self.pnl_col,
-            self.pnl_row_offset,
-        )
-        slot = InstrumentSlot(
-            instrument=instrument,
-            row=row,
-            looking_for=looking_for,
-            required_side=required_side,
-            qty_abs=qty_abs,
-            yield_prefix=yield_prefix,
-            input_cell=input_cell,
-            qty_cell=qty_cell,
-            pnl_cell=pnl_cell,
-        )
-        logger.debug(
-            "SLOTS_LOADED | looking_for=%s row=%s instrument=%s "
-            "qty=%s threshold=%s prefixes=3Y:%s 10Y:%s",
-            looking_for,
-            row,
-            instrument,
-            qty_abs,
-            threshold,
-            prefix_3y,
-            prefix_10y,
-        )
-        return [slot], format_looking_for_label(instrument, looking_for), threshold
-
     def write_yield(self, input_cell: str, yield_value: float) -> None:
         self._ensure()
         value = float(yield_value)
@@ -739,51 +588,6 @@ class ExcelBridge:
                         f"value={last_raw!r})"
                     )
                 time.sleep(CALC_POLL_INTERVAL_SECONDS)
-        finally:
-            self.release_workbook()
-
-    def update_status(
-        self,
-        status: Union[AppStatus, str],
-        looking_for: Optional[str] = None,
-        last_quote: Optional[str] = None,
-        last_pnl: Optional[float] = None,
-        last_action: Optional[str] = None,
-        *,
-        ignore_error: bool = False,
-    ) -> None:
-        if not self.write_status_cells:
-            return
-        if not (self.status_cell or "").strip():
-            return
-        try:
-            self._ensure()
-
-            def _write() -> None:
-                self._ws.Range(self.status_cell).Value = format_status(status)
-                if looking_for is not None:
-                    self._ws.Range(self.looking_for_cell).Value = looking_for
-                if last_quote is not None:
-                    self._ws.Range(self.last_quote_cell).Value = last_quote
-                if last_pnl is not None:
-                    self._ws.Range(self.last_pnl_cell).Value = float(last_pnl)
-                if last_action is not None:
-                    self._ws.Range(self.last_action_cell).Value = last_action
-
-            self._call_excel(_write, check_stop=False)
-        except StopRequested:
-            raise
-        except ExcelDisconnected:
-            raise
-        except Exception as exc:
-            if ignore_error:
-                logger.error("Excel status update failed: %s", exc)
-                return
-            if is_excel_gone(exc):
-                raise ExcelDisconnected(
-                    f"Workbook '{self.workbook_name}' is not open in Excel"
-                ) from exc
-            raise ExcelBridgeError(f"Excel status update failed: {exc}") from exc
         finally:
             self.release_workbook()
 

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import atexit
 import json
 import os
 import secrets
@@ -397,6 +398,10 @@ def create_app() -> FastAPI:
         thread = threading.Thread(target=_uploader_loop, name="audit-uploader", daemon=True)
         thread.start()
 
+    @app.on_event("shutdown")
+    def _shutdown() -> None:
+        stop_watcher(soft_wait_seconds=2.0)
+
     return app
 
 
@@ -405,6 +410,7 @@ def run_local_web(host: str = "127.0.0.1", port: int = 8765) -> int:
 
     ensure_device_activated()
     app = create_app()
+    atexit.register(lambda: stop_watcher(soft_wait_seconds=2.0))
     print(f"KBondWatcher local UI http://{host}:{port}/")
     print(f"local token (header X-KBond-Token): {LOCAL_TOKEN}")
     uvicorn.run(app, host=host, port=port, log_level="info")

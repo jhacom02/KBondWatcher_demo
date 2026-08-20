@@ -1,6 +1,5 @@
 pywin32
 psutil
-python-dotenv
 pytest
 pyautogui
 pyperclip

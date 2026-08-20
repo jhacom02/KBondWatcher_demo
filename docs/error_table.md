@@ -1,91 +1,132 @@
-# KBondWatcher 에러 표
+# KBondWatcher 에러 표 (Trader Web)
 
-운영 실패는 F2 `ERROR`, J2 `(HH:MM:SS) Error: {원인}` (최대 200자), `pythonw` **exit 1**. Config는 같은 셀 기록을 시도한 뒤 **exit 2**. VBA Fail은 Python보다 앞이며 J2 시각 형식이 `HH:nn:ss`다.
+트레이더 Local Web에서 보이는 메시지 기준.  
+운영 실패는 Status `ERROR` + Last Action/`last_error`, watcher **exit 1**. Profile·START 거부는 formFlash(빨간 글씨).
 
-메시지 템플릿 단위다. Config 키 하나하나를 행으로 쪼개지 않았다 (`missing required config key`는 키가 달라도 같은 유형). 파서 실패는 예외 없이 `None`을 돌려 아래 “에러 아님”과 같다.
+애매하면 **전송하지 않고 즉시 ERROR**. 폴백 없음. VBA·`.env`·Excel F2–J2 UI 없음.
 
-## Config — exit 2
+**대응**은 트레이더가 할 일을 짧게 적는다. 코드/배포 문제는 `개발자 패치 요청`.
 
-| 조건 | 메시지 | 의미 |
-|------|--------|------|
-| `.env` 파일 없음 | `config file not found: {path}` | 설정 파일을 열 수 없음. stderr + Excel ERROR 시도 후 종료 |
-| 필수 키 없음 | `missing required config key: {key}` | MODE, EXCEL_*, SEND_*_PAUSE, SENT_AFTER, LOG_* 등이 파일/환경에 없음 |
-| 형식 오류 | `{key} must be a boolean/number/integer` / `column letter` / `between 0 and 1` / `must not be empty` | 값 타입·범위가 잘못됨 |
-| MODE 범위 밖 | `MODE must be 1, 2, or 3, got {mode}` | 1·2·3만 허용 |
-| SENT_AFTER 불량 | `SENT_AFTER must be exit or loop` | `exit`=전송 후 종료, `loop`=reseed 후 계속 |
-| MODE 1·2인데 채팅 제목 없음 | `KBOND_CHAT_TITLE must not be empty` | 분리창 제목 필터가 비어 있음. MODE 3은 이 키 불필요 |
-| 폴링 너무 짧음 | `POLL_INTERVAL_MS must be >= 100` | CPU·UI 부하 하한 |
-| 빈 경로/셀/템플릿 | `EXCEL_WORKBOOK` / `MESSAGE_TEMPLATE` / `STOP_FLAG_PATH` / `LOG_PATH` / `{cell_key} must not be empty` | 워크북·상태셀·템플릿·로그 경로가 빈 문자열 |
-| 오프셋·밴드 | `EXCEL_PNL_ROW_OFFSET must be >= 0` / `EXCEL_PNL_SANITY_BAND must be > 0` | PnL 행 오프셋과 sanity band 제약 |
-| 슬롯 행이 만기 목록 밖 | `EXCEL_SLOT_ROWS contains {row} not in EXCEL_ROWS_10Y/3Y` | 허용 슬롯이 3Y/10Y prefix 매핑에 없음 |
+---
 
-## Excel · PnL — exit 1
+## Profile / Save·Submit (formFlash profile)
 
-| 조건 | 메시지 | 의미 |
-|------|--------|------|
-| Excel 미실행·COM 없음 | `pywin32 is required` / `Failed to connect to running Excel.Application: {exc}` | pywin32 미설치이거나 GetObject/ROT가 아닌 이유로 COM 연결 실패. 워크북이 닫힌 경우는 아래 EXCEL_WAIT |
-| 워크북 FullName 읽기 실패 | `Failed to read FullName for workbook {name}` | 열린 객체의 FullName COM 실패. 종료 |
-| 시트 없음 | `Worksheet '{sheet}' not found` / `No ActiveSheet available` | `EXCEL_SHEET` 이름 오류 또는 ActiveSheet 없음 |
-| Excel busy 5초 초과 | `Excel busy after 50 retries: {last}` | RPC busy를 50×0.1s 재시도한 뒤 포기 |
-| 감시 셀 수식 오류 | `{cell} formula is not a single A{row} ref` / `must reference column A` / `must reference the current sheet` / `row N is not in EXCEL_SLOT_ROWS` / `is empty` / `instrument matches N slot rows` | D2가 `=A41` 형태가 아니거나 허용 행이 아님. 종목 문자열이 0건·2건 매칭 |
-| 슬롯 값 불량 | `{A}{row} is empty` / `{E}{row} must be a non-zero integer` / `row N is not mapped to 3Y or 10Y` / `failed to read yield prefixes` / `slot row allowlist is empty` | 종목 빈칸, E열 0·소수, prefix 셀 비숫자 |
-| 셀이 숫자가 아님 | `Excel cell is #VALUE!` (`#NULL!` `#DIV/0!` `#REF!` `#NAME?` `#NUM!` `#N/A`) / `empty/None` / `blank` / `unexpected boolean` / `cannot convert…` | CVErr·빈칸을 PnL로 쓰지 않음. 대기 루프 안에서는 재시도 |
-| 30초 동안 숫자 PnL 없음 | `{pnl_cell} not numeric after 30.0s ({detail}, CalculationState={state}, value=…)` | xlDone이 안 되거나 `#VALUE!`/빈칸이 유지됨. `Calculate` 강제 없음 |
-| CalculationState 읽기 실패 | `Failed to read Excel CalculationState: {exc}` | COM이 계산 상태를 반환하지 못함 |
-| 상태 셀 쓰기 실패 | `Excel status update failed: {exc}` | F2~J2 쓰기 실패는 즉시 종료. ERROR 기록 자체 실패만 로그 |
-| \|pnl − threshold\| > band | `PnL {pnl} outside sanity band {band} of threshold {threshold}` | E2 기준 ±band. I2에 해당 pnl 기록 후 종료 |
-| 임계값 미로드 | `PnL threshold is not loaded` | `load_slots`가 threshold 없이 진행된 내부 불일치 |
-| 감시 슬롯이 PnL 중 변경 | `watch slot changed during PnL ({before} -> {after})` | evaluate 직전 재로드한 종목·방향·수량·임계가 호가 시점과 다름 |
-| 한 폴에 호가 2건 이상 | `ambiguous quotes in one poll: {n}` | 어느 줄이 대상인지 모호. 전송하지 않음 |
-| 확정 토큰을 뒤집을 수 없음 | `cannot flip side token: {raw_token}` | 트리거 후 `format_message`. 파서가 통과한 토큰이면 드묾 |
-| evaluate looking_for 이상 | `looking_for must be BID or OFFER, got {value}` | 슬롯 내부값은 BID/OFFER. G2 표시용 `25-11 / BID`는 evaluate에 안 넘김 |
+| 조건 | 메시지 | 의미 | 대응 |
+|------|--------|------|------|
+| Name 빈칸 | `profile_name is required` | 필수 | Name 입력 후 Save |
+| 종목 불허 | `instrument must be one of …` | 허용 종목만 | 목록에서 선택 |
+| Looking For 이상 | `looking_for must be BID or OFFER` | | BID/OFFER 선택 |
+| 수량 ≤0 | `required_qty must be > 0` | | 양의 정수 |
+| 임계 비숫자 | `threshold must be numeric` | | 숫자 입력 |
+| 임계 연산자 | `threshold_op must be <= or >=` | | ≤ / ≥ 선택 |
+| 워크북 없음 | `excel_workbook FullName is required` | | Find로 열린 워크북 선택 |
+| 워크북이 파일명만 | `excel_workbook must be a FullName path, not a bare Name` | 전체 경로 필요 | Find 다시 |
+| 시트 없음 | `excel_sheet is required` | | Sheet 선택 |
+| 셀 형식 | `yield_input_cell` / `pnl_cell` `must be a cell like D19` | | 예: D41, F44 |
+| Yield Prefix | `yield_prefix must be 3 or 4` | | 3 또는 4 |
+| Mode | `mode must be 1, 2, or 3` | | Mode 선택 |
+| MODE 1·2 채팅제목 | `kbond_chat_title is required for MODE 1/2` | | Chat Title 입력 |
+| Loop | `sent_after must be exit or loop` | | exit/loop |
+| MODE 1 + loop | `sent_after must be exit when mode is 1` | Mode 1은 exit만 | exit로 변경 |
+| 감시 중 프로필 변경 | `stop watcher before changing profile` | START 중 Save/Submit/Calibrate 금지 | STOP 후 재시도 |
+| Admin URL 없음 | `KBOND_ADMIN_URL required` | Submit에 Admin 필요 | start.bat/환경에 URL 설정, 개발자 확인 |
+| draft 없음 | `no draft: …` | Submit 전 Save 필요 | Save 후 Submit |
+| Admin HTTP/네트워크 | `admin HTTP {code}: …` / `admin request failed: …` | Admin 거부·끊김 | Admin 상태·URL·HTTPS 확인; 지속 시 개발자 |
+| Pilot HTTP URL | `pilot mode requires HTTPS KBOND_ADMIN_URL` | Pilot는 HTTPS만 | URL을 HTTPS로 |
+| 열린 워크북 0개 | `No open Excel workbook.` | Find 결과 | Excel에서 대상 xlsm 연 뒤 Find |
+| schema 불일치 | `unsupported profile_schema_version …` | 엔진·프로필 포맷 불일치 | 개발자 패치/재배포 |
 
-## 소스 — exit 1
+---
 
-| 조건 | 메시지 | 의미 |
-|------|--------|------|
-| MODE 비정상 | `unsupported MODE: {mode}` | loader를 우회한 경우에만 |
-| 프로세스/제목 설정 빠짐 | `source_process_name is required` / `source_window_title is required` | MODE 1·2 생성자 가드 |
-| 메신저 미실행 | `process not running: 'KBondMessenger.exe'` | 프로세스가 없음 |
-| 방 제목 0건 | `no visible TJvRichEdit whose window title contains '{needle}'` | `KBOND_CHAT_TITLE`과 맞는 가시 분리창이 없음 |
-| 방 제목 2창 이상 | `ambiguous chat windows matching '{needle}': [titles]` | 같은 문자열이 서로 다른 창에 걸림 |
-| 창은 맞는데 본문 컨트롤 없음 | `no visible TJvRichEdit chat pane in window matching '{needle}'` | 제목은 맞지만 면적/높이 조건의 채팅 RichEdit가 없음 |
-| 핸들 무효 | `TJvRichEdit hwnd not resolved` | 캐시된 채팅 컨트롤을 읽기 전에 창을 못 잡음 |
-| 문서 >200만자, 프로세스 메모리 읽기 실패 | `OpenProcess` / `IsWow64Process` / `VirtualAllocEx` / `WriteProcessMemory` / `ReadProcessMemory failed` | `EM_GETTEXTRANGE`용 원격 버퍼 실패. 앞에서 자른 GETTEXT로 폴백하지 않음 |
-| 본문 읽기 API 실패 | `WM_GETTEXTLENGTH failed` / `WM_GETTEXT failed: {exc}` | 길이·본문 SendMessage 실패 |
-| FORESTBOND 창 없음 (MODE 3) | `window containing title 'FORESTBOND' not found` | 제목 부분일치 창이 데스크톱에 없음 |
-| UIA 열거 실패 | `Failed to enumerate UIA desktop windows` / `Failed to read FORESTBOND window size` / `Failed to enumerate Text controls` / `Failed to read UIA Text: {exc}` | Text 열거 예외는 최대 2회 재시도 후 ERROR. 그 외 폴백 없음 |
-| Text 컨트롤 0건 | `no UIA Text controls` | 창은 있으나 Text 역할 컨트롤이 없음 |
+## START / STOP (formFlash status)
 
-## 전송 — exit 1
+| 조건 | 메시지 | 의미 | 대응 |
+|------|--------|------|------|
+| Profile 검증 실패 | (위 Profile 메시지와 동일) | START 전 validate | 필드 수정 후 START |
+| 이미 실행 중 | `watcher already running pid=…` | 이중 START | STOP 후 START; 안 되면 작업관리자에서 watcher/`main` 종료 |
+| START 성공 | `started pid=…` | 정상 | — |
+| Job 배정 실패(경고) | `started pid=… · console-close kill unavailable` | 콘솔 강제종료 시 자식이 남을 수 있음 | STOP/탭닫기로 중단; 가능하면 콘솔를 직접 실행 |
+| STOP 성공 | `stopped` | | — |
+| STOP 강제종료 실패 | `failed to terminate pid=…` | 프로세스 안 죽음 | 작업관리자에서 해당 PID 종료 후 재실행 |
+| 기기 미활성화 | `device is not activated` | Admin 미승인 | Admin에서 device activate |
+| 원격 disable | `device is remotely disabled` / `remotely disabled` | Admin 차단 | Admin Enable 요청 |
+| Lease 없음 | `license lease missing` | | Admin URL·네트워크 확인 후 재START; 개발자 |
+| Lease 서명 불량 | `license lease signature invalid` | 키/위조 | `KBOND_SIGNING_PUBLIC_KEY`·Admin 키 확인, 개발자 |
+| Lease device 불일치 | `license lease device mismatch` | | 재등록/개발자 |
+| Lease disabled | `license lease disabled` | | Admin 확인 |
+| Lease 만료 | `license lease expired` | | Admin lease 재발급·재START |
+| profile_version 불일치 | `lease profile_version … != local …` | 승인 프로필과 로컬 불일치 | Admin 승인 프로필 동기화(약 60초) 후 START |
+| 엔진 버전 부족 | `engine … below minimum …` | min_engine | 최신 패키지 설치, 개발자 |
+| 프로필 서명 없음/불량 | `profile signature required` / `profile signature invalid` | 미승인·키 없음·위조 | Submit→Approve→자동적용 후 START; public key 설정 확인 |
+| Demo 만료 | `demo expired on …` | 파일 날짜 지남 | 개발자(새 빌드/expiry) |
+| Demo 파일 없음/불량 | `demo_expiry.txt missing…` / `invalid date` / `empty` | Pilot fail-closed | 개발자 패치 |
+| credential | `device credential missing` / `failed to unprotect…` | DPAPI/자격 | 같은 Windows 계정으로 재실행; 안 되면 개발자 |
+| Pilot 로컬 lease 금지 | `local lease issuance forbidden in pilot mode` | Admin lease만 | Admin·URL 확인 |
+| Excel preflight | `excel preflight failed: …` / `workbook FullName mismatch …` | 워크북 미오픈·경로 불일치 | Excel에서 Profile과 같은 파일 연 뒤 START |
+| Source preflight | `source preflight failed: …` | 채팅 창 없음 | KBond/FORESTBOND·제목 확인 후 재실행 |
+| Send preflight | `send target preflight failed: …` | 전송 창 없음 | Notepad/KBond 전송창 연 뒤 재실행 |
+| 탭 닫기/새로고침 | (자동 STOP) | 의도적 중단 | 다시 보려면 START |
 
-| 조건 | 메시지 | 의미 |
-|------|--------|------|
-| 전송 프로세스 없음 | `{process} is not running` | MODE 1은 KBondMessenger, 2·3은 notepad.exe |
-| 전송 창 제목 없음 | `window containing title '{title}' not found` | MODE 1은 `KBOND_CHAT_TITLE`, 2·3은 `메모장` |
-| 포그라운드 실패 | `failed to foreground hwnd={hwnd}` / `invalid window handle` | Alt/AttachThreadInput으로도 전경이 안 됨. foreground 실패는 최대 2회 재시도 후 ERROR (`invalid window handle`는 재시도 없음) |
-| 클릭 후 포커스가 다른 앱 | `send focus not on target fg='…' under='…'` | Excel 등 다른 창에 붙여넣기 방지. foreground/focus 오류는 최대 2회 재시도 후 ERROR |
-| 클립보드 불일치 | `clipboard mismatch after copy` | `copy` 직후 클립보드가 전송문과 다름. Ctrl+V 전에 중단 |
-| 창 크기·비교 실패 | `invalid window size` / `failed to compare send target windows: {exc}` | rect가 0이거나 HWND 비교 실패 |
+---
 
-## VBA (Python보다 앞)
+## Coordinate (formFlash coord)
 
-| 조건 | 메시지 | 의미 |
-|------|--------|------|
-| Start/Stop Fail | `(HH:nn:ss) Error: {Err.Description}` | pythonw가 안 뜬 상태일 수 있음. `.bas`를 엑셀에 다시 넣어야 최신 로직 적용 |
-| taskkill 비정상 코드 | `taskkill failed: {rc}` | 소프트 스톱(최대 8s) 뒤 최후 `/F`. 0=성공, 128=이미 없음(정상). 그 외는 Fail |
-| PowerShell sweep 종료코드 ≠ 0 | `Stop-Process failed: {rc}` | python/pythonw의 `main.py`만 대상. Excel은 죽이지 않음 |
+| 조건 | 메시지 | 의미 | 대응 |
+|------|--------|------|------|
+| 전송 창 없음 | `send target window not found` | | Mode에 맞는 창 연 뒤 Calibrate |
+| 창 크기 이상 | `invalid send window size` | | 창 최대화/복원 후 재시도 |
+| 클릭 타임아웃 | `timed out waiting for click` | | 안내대로 대상 창을 1회 클릭 |
 
-## 에러가 아닌 것 (중단하지 않음)
+---
 
-| 조건 | 보이는 것 | 의미 |
-|------|-----------|------|
-| 호가 미매칭 | 없음 | 감시 종목·side·수량이 안 맞으면 다음 줄 |
-| fingerprint 중복 | 없음 | MODE 1·2: 같은 `watermark_key`는 세션 내 재처리 안 함. MODE 3는 세션 set을 쓰지 않고, 리더가 개수가 늘어난 줄만 검토 |
-| 임계 미달 | J2 `Quote Skipped` | PnL이 BID/OFFER 조건을 못 채움. F2는 WATCHING |
-| 정상 중지 | J2 `Stopped`, F2 `STOPPED`, exit 0 | stop 플래그 또는 `StopRequested` |
-| Excel 닫힘 대기 | J2 `Excel closed; waiting to reopen {파일명}`, F2 `EXCEL_WAIT` | 워크북/RPC 소멸. 파일이 다시 열리면 WATCHING. 전송 없음. exit 하지 않음 |
-| `SENT_AFTER=exit` 전송 성공 | J2 `Message Sent`, F2 `SENT`, exit 0 | 한 번 보내고 종료 |
-| 문서 > 200만 wchar | 종료 없음 | 끝 200만만 읽음. 읽기 실패만 ERROR |
+## Watcher ERROR — Excel · PnL (Status Last Action / last_error)
 
-PID/stop 파일 정리 실패, ERROR 셀 쓰기 실패, `CoUninitialize` 실패는 이미 종료 중이라 `log.error`만 남긴다.
+| 조건 | 메시지 | 의미 | 대응 |
+|------|--------|------|------|
+| Excel/COM 없음·끊김 | `Workbook '…' is not open in Excel` / `Failed to connect…` / `pywin32 is required…` | **재연결 없음·ERROR** | Excel에서 대상 파일 연 뒤 **재START**; COM 반복 시 작업관리자에서 Excel 종료 후 재오픈 |
+| 시트 없음 | `Worksheet '{sheet}' not found` | Profile sheet 오류 | Sheet Name 수정·Save/Approve 후 START |
+| Excel busy 초과 | `Excel busy after … retries` | RPC busy | Excel 응답 대기·다른 매크로 중단 후 재START; 반복 시 Excel 재시작 |
+| PnL 비숫자/CVErr | `Excel cell is #VALUE!` 등 / `blank` / `cannot convert…` | | 시트 수식·입력셀 확인; 개발자/시트 담당 |
+| PnL 대기 타임아웃 | `{pnl_cell} not numeric after 30.0s …` | 계산 미완료 | 자동계산·수식 확인 후 재START |
+| Sanity band | `PnL {pnl} outside sanity band {band} of threshold {threshold}` | 비정상 PnL·**전송 없음** | threshold/시트 확인; 이상치면 개발자 |
+| 확정 토큰 flip | `cannot flip side token: …` | | 해당 호가 형식 이슈 → 개발자 패치 요청 |
+
+---
+
+## Watcher ERROR — 소스 (채팅)
+
+| 조건 | 메시지 | 의미 | 대응 |
+|------|--------|------|------|
+| 메신저 미실행 | `process not running: 'KBondMessenger.exe'` | MODE 1·2 | KBond 실행 후 재START |
+| 방 제목 0건 | `no visible … title contains '…'` | Chat Title 불일치 | 분리창 제목·Profile Title 맞춘 뒤 재START |
+| 방 제목 2건+ | `ambiguous chat windows matching '…'` | 동일 제목 창 복수 | 다른 창 닫거나 Title을 더  uniquely |
+| 채팅 pane 없음 | `no visible … chat pane…` / `TJvRichEdit hwnd not resolved` | | 분리 채팅창 상태 확인·재START |
+| FORESTBOND 없음 | `window containing title 'FORESTBOND' not found` | MODE 3 | FORESTBOND 실행 |
+| UIA/메모리 읽기 실패 | `Failed to enumerate…` / `OpenProcess failed…` / `WM_GETTEXT…` / `no UIA Text controls` | | 창 다시 열고 재START; 반복 시 개발자 |
+| 한 폴 호가 2건+ | `ambiguous quotes in one poll: {n}` | **전송 없음** | 조건/시장 확인 후 재START; 반복 시 개발자 |
+
+---
+
+## Watcher ERROR — 전송
+
+| 조건 | 메시지 | 의미 | 대응 |
+|------|--------|------|------|
+| 전송 프로세스 없음 | `{process} is not running` | notepad/KBond | 대상 앱 실행 후 재START |
+| 전송 창 없음 | `window containing title '…' not found` | | 메모장/채팅 입력창 연 뒤 재START |
+| 포그라운드 실패 | `failed to foreground hwnd=…` | | 창을 앞으로·다른 전체화면 닫고 재START |
+| 포커스 이탈 | `send focus not on target …` | 다른 창에 붙여넣기 방지 | 전송 창만 두고 재START; Coordinate 재설정 |
+| 클립보드 불일치 | `clipboard mismatch after copy` | | 재START; 반복 시 개발자 |
+| 창 크기/핸들 | `invalid window size` / `invalid window handle` | | 창 복원 후 재START |
+
+---
+
+## 에러가 아닌 것 (중단·전송 없음 또는 정상)
+
+| 조건 | 보이는 것 | 의미 | 대응 |
+|------|-----------|------|------|
+| 호가 미매칭 | (변화 없음) | 종목·side·수량 불일치 | Profile/Looking For 확인 |
+| 임계 미달 | Last Action `Quote Skipped`, WATCHING | NO_TRIGGER | 정상; threshold 조정은 필요 시 |
+| 정상 STOP | `stopped` / STOPPED | | — |
+| 전송 성공 exit | SENT 후 종료 | `sent_after=exit` | 다시 보려면 START |
+| 전송 성공 loop | SENT → WATCHING | 데모 loop | STOP으로만 완전 중단 |
+| 프로필 동기화 대기 | status에 승인/적용 안내 | Admin Approve 대기 | Approve 후 약 60초 대기 |

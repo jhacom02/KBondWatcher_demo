@@ -123,7 +123,7 @@ def test_config_from_profile_mode2() -> None:
     assert cfg.mode == 2
     assert cfg.send_input_x == 0.2
     assert cfg.excel_workbook.endswith("bond.xlsm")
-    assert cfg.excel_status_cell == ""
+    assert cfg.excel_pnl_sanity_band > 0
 
 
 def test_runtime_status_roundtrip(tmp_path: Path) -> None:

@@ -64,7 +64,6 @@ def run_watcher_from_profile() -> int:
         clear_pid_file,
         clear_stop_flag,
         collect_batch_matches,
-        excel_failure_action,
         log_new_source_lines,
         pid_file_path,
         stop_requested,
@@ -97,24 +96,6 @@ def run_watcher_from_profile() -> int:
     excel = ExcelBridge(
         workbook_name=cfg.excel_workbook,
         sheet_name=cfg.excel_sheet,
-        status_cell="",
-        looking_for_cell="",
-        last_quote_cell="",
-        last_pnl_cell="",
-        last_action_cell="",
-        watch_cell="",
-        pnl_threshold_cell="",
-        slot_rows=(0,),
-        rows_10y=(),
-        rows_3y=(),
-        prefix_3y_cell="",
-        prefix_10y_cell="",
-        instrument_col="A",
-        qty_col="E",
-        input_col="D",
-        pnl_col="F",
-        pnl_row_offset=0,
-        write_status_cells=False,
     )
     excel.set_stop_check(lambda: stop_requested(cfg.stop_flag_path))
 
@@ -124,23 +105,17 @@ def run_watcher_from_profile() -> int:
         publish("STARTING")
 
         prefix = 0.0
-        try:
-            excel.connect()
-            prefix = resolve_yield_prefix(profile, excel)
-        except ExcelDisconnected as exc:
-            publish("EXCEL_WAIT", last_error=str(exc), last_action="waiting for excel")
-            session.status = AppStatus.EXCEL_WAIT
-            log.info("EXCEL_WAIT | %s", exc)
-        else:
-            session.status = AppStatus.WATCHING
-            publish("WATCHING", last_action="Start Successful")
-            log.info(
-                "WATCHING | mode=%s looking_for=%s threshold=%s profile_v=%s",
-                cfg.mode,
-                looking_label,
-                threshold,
-                profile.profile_version,
-            )
+        excel.connect()
+        prefix = resolve_yield_prefix(profile, excel)
+        session.status = AppStatus.WATCHING
+        publish("WATCHING", last_action="Start Successful")
+        log.info(
+            "WATCHING | mode=%s looking_for=%s threshold=%s profile_v=%s",
+            cfg.mode,
+            looking_label,
+            threshold,
+            profile.profile_version,
+        )
 
         reader = create_source_reader(cfg)
         reader.find_source_window()
@@ -157,21 +132,6 @@ def run_watcher_from_profile() -> int:
                 clear_stop_flag(cfg.stop_flag_path)
                 return 0
 
-            if session.status == AppStatus.EXCEL_WAIT:
-                try:
-                    excel.connect()
-                    prefix = resolve_yield_prefix(profile, excel)
-                    slot = slot_from_profile(profile, prefix)
-                    session.status = AppStatus.WATCHING
-                    publish("WATCHING", last_action="Excel reconnected")
-                    log.info("WATCHING | excel reconnected")
-                except ExcelDisconnected as exc:
-                    log.info("EXCEL_WAIT | %s", exc)
-                    publish("EXCEL_WAIT", last_error=str(exc))
-                    time.sleep(poll_sec)
-                continue
-
-            # heartbeat
             publish(session.status.value if hasattr(session.status, "value") else str(session.status))
 
             lines = reader.get_new_message_lines(
@@ -354,15 +314,7 @@ def run_watcher_from_profile() -> int:
                             publish("WATCHING")
                             log.info("WATCHING")
                 except ExcelDisconnected as exc:
-                    action = excel_failure_action(
-                        exc, calculating=session.status == AppStatus.CALCULATING
-                    )
-                    if action == "error":
-                        raise ExcelBridgeError(str(exc)) from exc
-                    session.status = AppStatus.EXCEL_WAIT
-                    publish("EXCEL_WAIT", last_error=str(exc))
-                    log.info("EXCEL_WAIT | %s", exc)
-                    continue
+                    raise ExcelBridgeError(str(exc)) from exc
 
             time.sleep(poll_sec)
 

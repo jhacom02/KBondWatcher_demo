@@ -5,6 +5,7 @@
 # [ ] Frozen/Nuitka: deploy_mode=pilot even if KBOND_DEPLOY_MODE=dev
 # [ ] Nuitka onefolder: VERSION.txt + demo_expiry.txt (build+7d); no .py; no admin.db in dist
 # [ ] start.bat present; replace KBOND_ADMIN_URL + KBOND_SIGNING_PUBLIC_KEY before zip
+# [ ] Frozen START spawns main.exe --run-profile (not missing main.py)
 #
 # Credential / lease / profile
 # [ ] device.json has credential_blob + credential_protection=dpapi (no plaintext credential)
@@ -14,6 +15,7 @@
 # [ ] Profile: Local Web saves draft only when Admin URL set; submit → Admin approve → apply
 # [ ] Tampered profile.json or .sig fails START + PROFILE_REJECTED / LICENSE_REJECTED audit
 # [ ] Past demo_expiry.txt date blocks START / policy poll soft STOP
+# [ ] No KBOND_SIGNING_PUBLIC_KEY (and no public key file) → verify fails immediately
 #
 # Controller policy poll (not in Quote→Excel→Send)
 # [ ] START with valid signed profile + lease
@@ -28,7 +30,11 @@
 #
 # Runtime regression
 # [ ] python main.py --serve ; calibrate; START/STOP
-# [ ] MODE 1 / 2 / 3 quote path; Excel EXCEL_WAIT reconnect
-# [ ] Ambiguous quotes fail-closed; send focus/clipboard guards
+# [ ] MODE 1 / 2 / 3 quote path; Excel close → ERROR (no reconnect)
+# [ ] Tab close / refresh → STOP via keepalive
+# [ ] Ambiguous quotes / sanity band → ERROR, no send
+# [ ] NO_TRIGGER skips send and stays WATCHING
+# [ ] sent_after=loop (demo) re-watches after successful send; mode 1 forces exit
 # [ ] Stale watcher PID cleared on START
+# [ ] Closing serve console / Ctrl+C stops watcher (job + shutdown hook)
 # [ ] pytest -q green

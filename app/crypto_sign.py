@@ -59,7 +59,6 @@ def _public_key_bytes() -> bytes:
     env = (os.environ.get("KBOND_SIGNING_PUBLIC_KEY") or "").strip()
     if env:
         return base64.urlsafe_b64decode(env + "==")[:32]
-    # Prefer packaged/public key file next to data or repo
     for candidate in (
         data_dir() / "admin_signing_public.key",
         Path(__file__).resolve().parents[1] / "keys" / "admin_signing_public.key",
@@ -68,11 +67,6 @@ def _public_key_bytes() -> bytes:
             return base64.urlsafe_b64decode(
                 candidate.read_text(encoding="ascii").strip() + "=="
             )[:32]
-    # Dev fallback: derive from admin private if present
-    priv_path = data_dir() / "admin_signing_private.key"
-    if priv_path.is_file():
-        priv = load_or_create_admin_private_key()
-        return priv.public_key().public_bytes(Encoding.Raw, PublicFormat.Raw)
     raise CryptoError(
         "no KBOND_SIGNING_PUBLIC_KEY configured; cannot verify signatures"
     )

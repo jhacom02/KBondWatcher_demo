@@ -16,7 +16,6 @@ from main import (
     collect_batch_matches,
     excel_failure_action,
     log_new_source_lines,
-    watch_identity,
 )
 from source import SourceReaderError, message_fingerprint
 from source.common import source_line
@@ -77,11 +76,6 @@ def test_collect_batch_matches_mode3_repeats_same_key() -> None:
     assert second[0][1].raw_token == "695 +"
 
 
-def test_watch_identity_tuple() -> None:
-    slot = _slot()
-    assert watch_identity(slot, 100_000.0) == ("25-10", "BID", 100, 100_000.0)
-
-
 def test_truncate_log_text() -> None:
     assert _truncate_log_text("short") == "short"
     long = "a" * 200
@@ -116,22 +110,18 @@ def test_log_new_source_lines_cap_and_mode3_key() -> None:
     assert "(12:00:00) : body-0" in log.messages[0]
 
 
-def test_excel_failure_action_wait_then_error_while_calculating() -> None:
+def test_excel_failure_action_disconnect_is_error() -> None:
     gone = ExcelDisconnected("Workbook 'sample.xlsm' is not open in Excel")
-    assert excel_failure_action(gone, calculating=False) == "wait"
+    assert excel_failure_action(gone, calculating=False) == "error"
     assert excel_failure_action(gone, calculating=True) == "error"
     assert excel_failure_action(StopRequested("stop flag set"), calculating=False) == "stop"
     assert excel_failure_action(ExcelBridgeError("Worksheet '트레이딩' not found"), calculating=False) == "error"
 
 
-def test_excel_reconnect_state_sequence() -> None:
-    statuses = ["WATCHING"]
+def test_excel_disconnect_stops_without_reconnect() -> None:
     action = excel_failure_action(
         ExcelDisconnected("Workbook 'sample.xlsm' is not open in Excel"),
         calculating=False,
     )
-    assert action == "wait"
-    statuses.append("EXCEL_WAIT")
-    statuses.append("WATCHING")
-    assert statuses == ["WATCHING", "EXCEL_WAIT", "WATCHING"]
+    assert action == "error"
 
