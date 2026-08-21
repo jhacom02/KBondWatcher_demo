@@ -1,12 +1,1 @@
-pywin32
-psutil
-pytest
-pyautogui
-pyperclip
-pywinauto
-fastapi
-uvicorn
-jinja2
-itsdangerous
-python-multipart
-cryptography
+streamlit>=1.38.0
