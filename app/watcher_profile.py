@@ -10,7 +10,7 @@ from app.audit import append_audit
 from app.controller import resolve_yield_prefix
 from app.defaults import DEFAULTS
 from app.machine import load_or_create_machine
-from app.profile import load_profile
+from app.profile import load_profile, prefs_snapshot
 from app.runtime_status import RuntimeStatus, write_runtime_status
 from core import (
     AppStatus,
@@ -197,16 +197,16 @@ def run_watcher_from_profile() -> int:
                                 "trader_id": trader_id,
                                 "machine_id": machine.machine_id,
                                 "engine_version": ENGINE_VERSION,
-                                "profile_version": profile.profile_version,
-                                "instrument": quote.instrument,
-                                "looking_for": matched_slot.looking_for,
                                 "quantity": quote.quantity,
                                 "raw_line": line.watermark_key,
                                 "parsed_yield": quote.yield_value,
                                 "pnl": pnl,
-                                "threshold": threshold,
                                 "result": "TRIGGERED" if result.triggered else "NO_TRIGGER",
                                 "error_message": result.reason,
+                                **prefs_snapshot(profile),
+                                "instrument": quote.instrument,
+                                "looking_for": matched_slot.looking_for,
+                                "threshold": threshold,
                             },
                         )
                         if not result.triggered:
@@ -227,15 +227,15 @@ def run_watcher_from_profile() -> int:
                                     "trader_id": trader_id,
                                     "machine_id": machine.machine_id,
                                     "engine_version": ENGINE_VERSION,
-                                    "profile_version": profile.profile_version,
-                                    "instrument": quote.instrument,
-                                    "looking_for": matched_slot.looking_for,
                                     "quantity": quote.quantity,
                                     "raw_line": line.watermark_key,
                                     "parsed_yield": quote.yield_value,
                                     "pnl": pnl,
-                                    "threshold": threshold,
                                     "sent_message": text,
+                                    **prefs_snapshot(profile),
+                                    "instrument": quote.instrument,
+                                    "looking_for": matched_slot.looking_for,
+                                    "threshold": threshold,
                                 },
                             )
                             t_send = time.perf_counter()
@@ -253,13 +253,13 @@ def run_watcher_from_profile() -> int:
                                         "trader_id": trader_id,
                                         "machine_id": machine.machine_id,
                                         "engine_version": ENGINE_VERSION,
-                                        "profile_version": profile.profile_version,
                                         "sent_message": text,
                                         "result": "FAILED",
                                         "error_message": send_err,
                                         "pnl": pnl,
-                                        "threshold": threshold,
                                         "raw_line": line.watermark_key,
+                                        **prefs_snapshot(profile),
+                                        "threshold": threshold,
                                     },
                                 )
                                 raise
@@ -285,16 +285,16 @@ def run_watcher_from_profile() -> int:
                                     "trader_id": trader_id,
                                     "machine_id": machine.machine_id,
                                     "engine_version": ENGINE_VERSION,
-                                    "profile_version": profile.profile_version,
-                                    "instrument": quote.instrument,
-                                    "looking_for": matched_slot.looking_for,
                                     "quantity": quote.quantity,
                                     "raw_line": raw_for_log,
                                     "parsed_yield": quote.yield_value,
                                     "pnl": pnl,
-                                    "threshold": threshold,
                                     "sent_message": text,
                                     "result": "SUCCESS",
+                                    **prefs_snapshot(profile),
+                                    "instrument": quote.instrument,
+                                    "looking_for": matched_slot.looking_for,
+                                    "threshold": threshold,
                                 },
                             )
                             session.status = AppStatus.SENT
@@ -329,8 +329,8 @@ def run_watcher_from_profile() -> int:
                 "trader_id": trader_id,
                 "machine_id": machine.machine_id,
                 "engine_version": ENGINE_VERSION,
-                "profile_version": profile.profile_version,
                 "error_message": str(exc),
+                **prefs_snapshot(profile),
             },
         )
         publish("ERROR", last_error=str(exc), last_pnl=last_pnl)
@@ -343,6 +343,7 @@ def run_watcher_from_profile() -> int:
                 "trader_id": trader_id,
                 "machine_id": machine.machine_id,
                 "error_message": str(exc),
+                **prefs_snapshot(profile),
             },
         )
         publish("ERROR", last_error=str(exc), last_pnl=last_pnl)

@@ -131,4 +131,4 @@ def test_watermark_uses_key_not_text(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def test_default_window_constant() -> None:
-    assert WATERMARK_WINDOW == 2000
+    assert WATERMARK_WINDOW == 1000

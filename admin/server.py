@@ -17,6 +17,7 @@ from fastapi.templating import Jinja2Templates
 
 from app import ENGINE_VERSION
 from app.crypto_sign import admin_sign_payload, export_public_key_b64
+from app.license import sign_profile_dict
 
 DB_PATH = Path(__file__).resolve().parent / "admin.db"
 STATIC_DIR = Path(__file__).resolve().parent / "static"
@@ -463,7 +464,7 @@ def create_app() -> FastAPI:
             version = int(row["profile_version"] or 0) + 1
             profile["trader_id"] = trader_id
             profile["profile_version"] = version
-            signature = admin_sign_payload(profile)
+            signature = sign_profile_dict(profile)
             conn.execute(
                 "UPDATE traders SET profile_json=?, profile_signature=?, profile_version=?, "
                 "updated_at=?, draft_json=NULL WHERE trader_id=?",
@@ -608,7 +609,7 @@ def create_app() -> FastAPI:
         data = await request.json()
         data["trader_id"] = trader_id
         data["profile_version"] = int(data.get("profile_version") or 0) + 1
-        signature = admin_sign_payload(data)
+        signature = sign_profile_dict(data)
         with _connect() as conn:
             conn.execute(
                 "INSERT INTO traders(trader_id, profile_json, profile_signature, profile_version, updated_at) "

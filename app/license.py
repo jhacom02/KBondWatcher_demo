@@ -14,7 +14,7 @@ from .cred_protect import ProtectionMethod, protect_secret, unprotect_secret
 from .crypto_sign import admin_sign_payload, verify_admin_signature
 from .deploy_mode import is_dev, is_pilot
 from .paths import device_path, lease_path, profile_path
-from .profile import TraderProfile
+from .profile import TraderProfile, policy_payload
 
 
 class LicenseError(RuntimeError):
@@ -276,8 +276,8 @@ def verify_policy_snapshot(
         )
 
 
-def sign_profile_dict(profile: dict[str, Any]) -> str:
-    return admin_sign_payload(profile)
+def sign_profile_dict(profile: dict[str, Any] | TraderProfile) -> str:
+    return admin_sign_payload(policy_payload(profile))
 
 
 def verify_signed_profile(profile: TraderProfile, signature: Optional[str]) -> None:
@@ -285,14 +285,5 @@ def verify_signed_profile(profile: TraderProfile, signature: Optional[str]) -> N
         return
     if not signature:
         raise LicenseError("profile signature required")
-    if not verify_admin_signature(profile.to_dict(), signature):
+    if not verify_admin_signature(policy_payload(profile), signature):
         raise LicenseError("profile signature invalid")
-
-
-# Back-compat aliases used by older imports
-def sign_payload(payload: dict[str, Any]) -> str:
-    return admin_sign_payload(payload)
-
-
-def verify_signature(payload: dict[str, Any], signature: str) -> bool:
-    return verify_admin_signature(payload, signature)

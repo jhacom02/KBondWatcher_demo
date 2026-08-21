@@ -11,6 +11,7 @@ from .paths import audit_path, audit_upload_status_path
 AUDIT_EVENTS = frozenset(
     {
         "PROFILE_SAVED",
+        "PROFILE_RUNTIME_SAVED",
         "WATCHER_STARTED",
         "WATCHER_STOPPED",
         "TRIGGER_RESULT",

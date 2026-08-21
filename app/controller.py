@@ -28,7 +28,7 @@ from app.license import (
 )
 from app.machine import load_or_create_machine
 from app.paths import stop_flag_path
-from app.profile import ProfileError, TraderProfile, load_profile
+from app.profile import ProfileError, TraderProfile, load_profile, prefs_snapshot
 from app.runtime_status import RuntimeStatus, read_runtime_status, write_runtime_status
 from excel import ExcelBridge, ExcelBridgeError, ExcelDisconnected, bind_open_workbook
 from excel.bridge import workbook_identity
@@ -287,12 +287,9 @@ def start_watcher_subprocess(python_exe: Optional[str] = None) -> PreflightResul
             "trader_id": profile.trader_id or profile.profile_name,
             "machine_id": machine.machine_id,
             "engine_version": ENGINE_VERSION,
-            "profile_version": profile.profile_version,
             "watcher_pid": proc.pid,
-            "instrument": profile.instrument,
-            "looking_for": profile.looking_for,
             "quantity": profile.required_qty,
-            "threshold": profile.threshold,
+            **prefs_snapshot(profile),
         },
     )
     msg = f"started pid={proc.pid}"
@@ -341,14 +338,21 @@ def stop_watcher(soft_wait_seconds: Optional[float] = None) -> PreflightResult:
     write_runtime_status(
         RuntimeStatus(state="STOPPED", engine_version=ENGINE_VERSION, last_action="stopped")
     )
-    append_audit(
-        "WATCHER_STOPPED",
-        {
-            "watcher_pid": pid,
-            "engine_version": ENGINE_VERSION,
-            "profile_version": status.profile_version,
-        },
-    )
+    stop_fields: dict[str, Any] = {
+        "watcher_pid": pid,
+        "engine_version": ENGINE_VERSION,
+        "profile_version": status.profile_version,
+    }
+    try:
+        stop_fields.update(prefs_snapshot(load_profile()))
+    except ProfileError:
+        if status.instrument:
+            stop_fields["instrument"] = status.instrument
+        if status.looking_for:
+            stop_fields["looking_for"] = status.looking_for
+        if status.threshold is not None:
+            stop_fields["threshold"] = status.threshold
+    append_audit("WATCHER_STOPPED", stop_fields)
     return PreflightResult(True, "stopped")
 
 

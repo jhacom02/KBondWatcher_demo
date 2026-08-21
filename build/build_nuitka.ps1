@@ -10,7 +10,7 @@ $ErrorActionPreference = "Stop"
 $Root = Split-Path -Parent $PSScriptRoot
 Set-Location $Root
 
-$Version = "0.3.0"
+$Version = "0.3.1"
 $DemoExpiryDays = 7
 $DemoExpiry = (Get-Date).AddDays($DemoExpiryDays).ToString("yyyy-MM-dd")
 $BuildFlags = Join-Path $Root "app\build_flags.py"

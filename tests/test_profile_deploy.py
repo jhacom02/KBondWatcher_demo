@@ -18,8 +18,11 @@ from app.profile import (
     TraderProfile,
     apply_signed_profile,
     load_profile,
+    policy_payload,
+    prefs_snapshot,
     save_profile,
     save_profile_draft,
+    save_profile_raw,
 )
 from app.side_map import required_side_from_looking_for
 from app.license import (
@@ -28,13 +31,13 @@ from app.license import (
     issue_lease,
     load_or_create_device,
     load_profile_signature,
+    sign_profile_dict,
     verify_lease_for_start,
     verify_signed_profile,
     LicenseError,
 )
 from app.runtime_status import RuntimeStatus, read_runtime_status, write_runtime_status
 from app.audit import append_audit, iter_audit
-from app.crypto_sign import admin_sign_payload
 from app.deploy_mode import get_deploy_mode
 from app.cred_protect import protect_secret, unprotect_secret
 
@@ -201,14 +204,28 @@ def test_signed_profile_required_in_pilot(
     profile = _valid_profile()
     with pytest.raises(LicenseError):
         verify_signed_profile(profile, None)
-    sig = admin_sign_payload(profile.to_dict())
+    sig = sign_profile_dict(profile)
     verify_signed_profile(profile, sig)
-    bad = dict(profile.to_dict())
-    bad["threshold"] = -99999
+    mutable = dict(profile.to_dict())
+    mutable["threshold"] = -99999
     from app.profile import TraderProfile as TP
 
+    verify_signed_profile(TP.from_dict(mutable), sig)
+    bad = dict(profile.to_dict())
+    bad["kbond_chat_title"] = "tampered"
     with pytest.raises(LicenseError):
         verify_signed_profile(TP.from_dict(bad), sig)
+
+
+def test_policy_payload_ignores_runtime_keys() -> None:
+    p = _valid_profile(threshold=-1, instrument="25-10", yield_input_cell="A1", pnl_cell="B1")
+    q = _valid_profile(threshold=-999, instrument="25-11", yield_input_cell="D19", pnl_cell="F22")
+    assert policy_payload(p) == policy_payload(q)
+    snap = prefs_snapshot(p)
+    assert snap["threshold"] == -1
+    assert snap["instrument"] == "25-10"
+    assert snap["yield_input_cell"] == "A1"
+    assert "kbond_chat_title" in snap
 
 
 def test_deploy_mode_env_dev(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -275,10 +292,103 @@ def test_apply_signed_profile(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -
     monkeypatch.setattr(crypto, "data_dir", lambda: tmp_path)
 
     profile = _valid_profile(profile_version=2)
-    sig = admin_sign_payload(profile.to_dict())
+    sig = sign_profile_dict(profile)
     apply_signed_profile(profile, sig)
     assert load_profile().profile_version == 2
     assert load_profile_signature()
+
+
+def test_runtime_save_keeps_version_and_sig(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("LOCALAPPDATA", str(tmp_path))
+    monkeypatch.setenv("KBOND_DEPLOY_MODE", "pilot")
+    import app.crypto_sign as crypto
+    import app.paths as paths_mod
+    from app.profile import policy_fields_equal, save_profile_draft
+
+    monkeypatch.setattr(crypto, "data_dir", lambda: tmp_path)
+    monkeypatch.setattr(paths_mod, "data_dir", lambda: tmp_path)
+
+    profile = _valid_profile(profile_version=3, threshold=-100.0)
+    sig = sign_profile_dict(profile)
+    apply_signed_profile(profile, sig)
+
+    runtime = TraderProfile(
+        **{**profile.to_dict(), "threshold": -250.0, "instrument": "25-4"}
+    )
+    assert policy_fields_equal(runtime, profile)
+    save_profile_raw(runtime)
+    loaded = load_profile()
+    assert loaded.profile_version == 3
+    assert loaded.threshold == -250.0
+    verify_signed_profile(loaded, load_profile_signature())
+
+    locked = TraderProfile(**{**runtime.to_dict(), "mode": 3})
+    assert not policy_fields_equal(locked, loaded)
+    draft = save_profile_draft(locked)
+    assert draft.mode == 3
+    assert load_profile().mode == 2
+    verify_signed_profile(load_profile(), load_profile_signature())
+
+
+def test_admin_approve_signs_policy_only(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import asyncio
+
+    from admin import server as admin_server
+    from admin.server import init_db
+    from app.crypto_sign import verify_admin_signature
+
+    db = tmp_path / "admin.db"
+    monkeypatch.setattr(admin_server, "DB_PATH", db)
+    monkeypatch.setattr("app.crypto_sign.data_dir", lambda: tmp_path)
+    init_db()
+    draft = _valid_profile(profile_version=0).to_dict()
+    with admin_server._connect() as conn:
+        conn.execute(
+            "INSERT INTO traders(trader_id, draft_json, profile_version, updated_at) "
+            "VALUES(?,?,?,?)",
+            ("t1", json.dumps(draft, ensure_ascii=False), 0, time.time()),
+        )
+    app = admin_server.create_app()
+    messages: list[dict] = []
+
+    async def receive():
+        return {"type": "http.request", "body": b"", "more_body": False}
+
+    async def send(message):
+        messages.append(message)
+
+    asyncio.run(
+        app(
+            {
+                "type": "http",
+                "asgi": {"version": "3.0"},
+                "http_version": "1.1",
+                "method": "POST",
+                "scheme": "http",
+                "path": "/api/profile/approve/t1",
+                "raw_path": b"/api/profile/approve/t1",
+                "query_string": b"",
+                "headers": [],
+                "client": ("127.0.0.1", 123),
+                "server": ("test", 80),
+            },
+            receive,
+            send,
+        )
+    )
+    start = next(m for m in messages if m["type"] == "http.response.start")
+    raw = b"".join(
+        m.get("body", b"") for m in messages if m["type"] == "http.response.body"
+    )
+    data = json.loads(raw.decode("utf-8"))
+    assert int(start["status"]) == 200
+    assert data["profile_version"] == 1
+    assert verify_admin_signature(policy_payload(data["profile"]), data["signature"])
+    assert not verify_admin_signature(data["profile"], data["signature"])
 
 
 def test_demo_expiry_future_ok(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

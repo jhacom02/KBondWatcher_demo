@@ -6,5 +6,7 @@ __pycache__/
 .DS_Store
 dist/
 dist-0.2.0/
+dist-0.3.0/
+dist-0.3.1/
 admin/admin.db
 *.db

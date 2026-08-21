@@ -20,17 +20,21 @@ UIA_TEXT_ENUM_MAX_RETRIES = 2
 UIA_TEXT_ENUM_RETRY_DELAY_SECONDS = 0.05
 
 
-def new_lines_after(prev: list[SourceLine], now: list[SourceLine]) -> list[SourceLine]:
+def new_lines_after(
+    prev: list[SourceLine],
+    now: list[SourceLine],
+    max_counts: Optional[Counter[str]] = None,
+) -> list[SourceLine]:
     if not prev:
         return []
     prev_keys = [item.watermark_key for item in prev]
     now_keys = [item.watermark_key for item in now]
     if not (set(prev_keys) & set(now_keys)):
         return []
-    prev_c = Counter(prev_keys)
+    baseline = max_counts if max_counts is not None else Counter(prev_keys)
     need: dict[str, int] = {}
     for key, count in Counter(now_keys).items():
-        extra = count - prev_c[key]
+        extra = count - baseline[key]
         if extra > 0:
             need[key] = extra
     new: list[SourceLine] = []
@@ -44,6 +48,12 @@ def new_lines_after(prev: list[SourceLine], now: list[SourceLine]) -> list[Sourc
     return new
 
 
+def bump_max_counts(max_counts: Counter[str], lines: list[SourceLine]) -> None:
+    for key, count in Counter(item.watermark_key for item in lines).items():
+        if count > max_counts[key]:
+            max_counts[key] = count
+
+
 class UiaSourceReader(BaseSourceReader):
     def __init__(self, source_window_title: str) -> None:
         super().__init__()
@@ -52,6 +62,7 @@ class UiaSourceReader(BaseSourceReader):
             raise SourceReaderError("source_window_title is required")
         self._window: Optional[BaseWrapper] = None
         self._prev_snapshot: list[SourceLine] = []
+        self._max_counts: Counter[str] = Counter()
 
     def find_source_window(self) -> BaseWrapper:
         desktop = Desktop(backend="uia")
@@ -149,6 +160,9 @@ class UiaSourceReader(BaseSourceReader):
     ) -> None:
         current = lines if lines is not None else self.get_visible_message_lines()
         self._prev_snapshot = watermark_window(current)
+        self._max_counts = Counter(
+            item.watermark_key for item in self._prev_snapshot
+        )
         self._initialized = True
 
     def reseed_watermark_from_visible(self) -> None:
@@ -162,7 +176,8 @@ class UiaSourceReader(BaseSourceReader):
         if not self._initialized:
             self.initialize_watermark(process_existing_on_start, lines=now)
             return []
-        new = new_lines_after(self._prev_snapshot, now)
+        new = new_lines_after(self._prev_snapshot, now, self._max_counts)
+        bump_max_counts(self._max_counts, now)
         self._prev_snapshot = now
         return new
 

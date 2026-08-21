@@ -249,6 +249,21 @@ def send_text(text: str, cfg: Config) -> None:
             time.sleep(cfg.send_foreground_retry_pause_seconds)
 
 
+def click_only(cfg: Config) -> None:
+    hwnd = ensure_target_window(cfg)
+    activate_window(hwnd, cfg)
+    _set_topmost(hwnd, True)
+    try:
+        _click_ratio(
+            hwnd,
+            cfg.send_input_x,
+            cfg.send_input_y,
+            cfg.send_input_click_pause_seconds,
+        )
+    finally:
+        _set_topmost(hwnd, False)
+
+
 def diagnose(cfg: Config) -> str:
     running = _is_process_running(cfg.send_process_name)
     pids = process_pids(cfg.send_process_name)

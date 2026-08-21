@@ -14,9 +14,71 @@ _CELL_RE = re.compile(r"^[A-Za-z]{1,3}\d{1,7}$")
 ALLOWED_INSTRUMENTS = frozenset({"25-10", "25-4", "25-8", "25-5", "25-11"})
 THRESHOLD_OPS = frozenset({"<=", ">="})
 
+POLICY_KEYS = (
+    "profile_name",
+    "trader_id",
+    "profile_version",
+    "profile_schema_version",
+    "kbond_chat_title",
+    "mode",
+    "sent_after",
+    "excel_workbook",
+    "excel_sheet",
+    "message_template",
+)
+
+RUNTIME_KEYS = (
+    "instrument",
+    "looking_for",
+    "required_qty",
+    "threshold",
+    "threshold_op",
+    "yield_prefix",
+    "yield_input_cell",
+    "pnl_cell",
+)
+
 
 class ProfileError(ValueError):
     pass
+
+
+def policy_payload(profile: TraderProfile | dict[str, Any]) -> dict[str, Any]:
+    data = profile.to_dict() if isinstance(profile, TraderProfile) else dict(profile)
+    out: dict[str, Any] = {}
+    for key in POLICY_KEYS:
+        if key == "profile_version":
+            out[key] = int(data.get(key) or 0)
+        elif key == "profile_schema_version":
+            out[key] = int(data.get(key) or PROFILE_SCHEMA_VERSION)
+        elif key == "mode":
+            out[key] = int(data.get(key) or 0)
+        elif key == "sent_after":
+            out[key] = str(data.get(key) or "").strip().lower()
+        else:
+            out[key] = data.get(key) if data.get(key) is not None else ""
+            if key in {
+                "profile_name",
+                "trader_id",
+                "kbond_chat_title",
+                "excel_workbook",
+                "excel_sheet",
+                "message_template",
+            }:
+                out[key] = str(out[key]).strip() if key != "excel_workbook" else str(out[key])
+    return out
+
+
+def policy_fields_equal(a: TraderProfile | dict[str, Any], b: TraderProfile | dict[str, Any]) -> bool:
+    return policy_payload(a) == policy_payload(b)
+
+
+def prefs_snapshot(profile: TraderProfile | dict[str, Any]) -> dict[str, Any]:
+    data = profile.to_dict() if isinstance(profile, TraderProfile) else dict(profile)
+    snap = policy_payload(data)
+    for key in RUNTIME_KEYS:
+        snap[key] = data.get(key)
+    return snap
 
 
 @dataclass
@@ -32,8 +94,8 @@ class TraderProfile:
     threshold_op: str = "<="
     excel_workbook: str = ""
     excel_sheet: str = ""
-    yield_input_cell: str = ""
-    pnl_cell: str = ""
+    yield_input_cell: str = "A1"
+    pnl_cell: str = "B1"
     yield_prefix: float = 3.0
     yield_prefix_cell: str = ""
     mode: int = 2

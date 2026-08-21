@@ -32,11 +32,15 @@ from app.controller import (
     start_watcher_subprocess,
     stop_watcher,
 )
-from app.crypto_sign import admin_sign_payload
 from app.deploy_mode import is_dev, is_pilot
 from app.license import (
+    LicenseError,
+    load_lease,
     load_or_create_device,
+    load_profile_signature,
     save_profile_signature,
+    sign_profile_dict,
+    verify_signed_profile,
 )
 from app.machine import load_or_create_machine, save_machine
 from app.paths import audit_cursor_path, local_token_path
@@ -47,8 +51,11 @@ from app.profile import (
     apply_signed_profile,
     load_profile,
     load_profile_draft,
+    policy_fields_equal,
+    prefs_snapshot,
     save_profile,
     save_profile_draft,
+    save_profile_raw,
 )
 from app.runtime_status import read_runtime_status
 
@@ -67,6 +74,27 @@ def _load_or_create_token() -> str:
 
 
 LOCAL_TOKEN = _load_or_create_token()
+
+_IDLE_STATES = frozenset({"STOPPED", "ERROR", "SENT", "DONE", ""})
+
+
+def _authorized_profile() -> tuple[bool, Optional[TraderProfile]]:
+    try:
+        profile = load_profile()
+    except ProfileError:
+        return False, None
+    try:
+        verify_signed_profile(profile, load_profile_signature())
+    except LicenseError:
+        return False, None
+    return True, profile
+
+
+def _lease_ok() -> bool:
+    lease = load_lease()
+    if lease is None:
+        return False
+    return time.time() <= float(lease.expires_at)
 
 
 def create_app() -> FastAPI:
@@ -110,17 +138,19 @@ def create_app() -> FastAPI:
             except ProfileError:
                 profile = TraderProfile()
         status = read_runtime_status()
+        authorized, signed = _authorized_profile()
         return TEMPLATES.TemplateResponse(
             request,
             "index.html",
             {
-                "profile": profile,
+                "profile": signed if signed is not None else profile,
                 "machine": machine,
                 "status": status,
                 "engine_version": ENGINE_VERSION,
                 "token": LOCAL_TOKEN,
                 "message": request.query_params.get("msg", ""),
                 "deploy_mode": "pilot" if is_pilot() else "dev",
+                "authorized": authorized,
             },
         )
 
@@ -128,10 +158,10 @@ def create_app() -> FastAPI:
     async def api_status():
         status = read_runtime_status()
         threshold_op = "<="
-        try:
-            active = load_profile()
+        authorized, active = _authorized_profile()
+        if active is not None:
             threshold_op = active.threshold_op or "<="
-        except ProfileError:
+        else:
             try:
                 draft = load_profile_draft()
                 threshold_op = draft.threshold_op or "<="
@@ -143,6 +173,18 @@ def create_app() -> FastAPI:
             "deploy_mode": "pilot" if is_pilot() else "dev",
             "audit_upload": read_audit_upload_status(),
             "profile_sync": get_last_profile_sync(),
+            "authorized": authorized,
+            "lease_ok": _lease_ok(),
+        }
+
+    @app.get("/api/profile/active")
+    async def api_profile_active():
+        authorized, profile = _authorized_profile()
+        return {
+            "authorized": authorized,
+            "profile": profile.to_dict() if profile is not None else None,
+            "defaults": TraderProfile().to_dict(),
+            "lease_ok": _lease_ok(),
         }
 
     @app.get("/api/workbooks")
@@ -151,8 +193,14 @@ def create_app() -> FastAPI:
 
     def _require_stopped() -> None:
         st = read_runtime_status().state
-        if st not in {"STOPPED", "ERROR", ""}:
+        if st not in _IDLE_STATES:
             raise HTTPException(400, detail="stop watcher before changing profile")
+
+    def _require_authorized() -> TraderProfile:
+        ok, profile = _authorized_profile()
+        if not ok or profile is None:
+            raise HTTPException(400, detail="profile not authorized")
+        return profile
 
     @app.post("/api/profile")
     async def api_profile_save(request: Request):
@@ -162,9 +210,12 @@ def create_app() -> FastAPI:
             existing = load_profile()
             version = existing.profile_version
             prev_template = existing.message_template
+            has_active = True
         except ProfileError:
+            existing = None
             version = 0
             prev_template = "{instrument} {confirm_token} ㅎㅈ"
+            has_active = False
         name = str(data.get("profile_name") or "").strip()
         payload = {
             **data,
@@ -178,7 +229,7 @@ def create_app() -> FastAPI:
             payload["sent_after"] = "exit"
         profile = TraderProfile.from_dict(payload)
         try:
-            draft = save_profile_draft(profile)
+            profile.validate()
         except ProfileError as exc:
             raise HTTPException(400, str(exc)) from exc
 
@@ -194,28 +245,86 @@ def create_app() -> FastAPI:
             except Exception as exc:
                 raise HTTPException(400, str(exc)) from exc
 
-        append_audit(
-            "PROFILE_SAVED",
-            {
-                "trader_id": draft.trader_id or draft.profile_name,
-                "machine_id": machine.machine_id,
-                "profile_version": draft.profile_version,
-                "engine_version": ENGINE_VERSION,
-                "draft": True,
-            },
-        )
-
         admin_url = (os.environ.get("KBOND_ADMIN_URL") or "").strip()
         if is_dev() and not admin_url:
-            saved = save_profile(draft)
-            sig = admin_sign_payload(saved.to_dict())
+            saved = save_profile(profile)
+            sig = sign_profile_dict(saved)
             save_profile_signature(sig)
             try:
                 refresh_lease_if_possible(saved)
             except Exception:
                 pass
+            append_audit(
+                "PROFILE_SAVED",
+                {
+                    "trader_id": saved.trader_id or saved.profile_name,
+                    "machine_id": machine.machine_id,
+                    "engine_version": ENGINE_VERSION,
+                    "draft": False,
+                    **prefs_snapshot(saved),
+                },
+            )
             return {"ok": True, "profile": saved.to_dict(), "mode": "dev_local_apply"}
 
+        sig = load_profile_signature() if has_active else None
+        runtime_only = bool(data.get("runtime_only"))
+        if runtime_only:
+            if not (has_active and existing is not None and sig):
+                raise HTTPException(400, "profile not authorized")
+            try:
+                verify_signed_profile(existing, sig)
+            except LicenseError as exc:
+                raise HTTPException(400, "profile not authorized") from exc
+            if not _lease_ok():
+                raise HTTPException(400, "license lease expired")
+            if not policy_fields_equal(profile, existing):
+                raise HTTPException(400, "locked fields cannot change in Settings")
+            save_profile_raw(profile)
+            append_audit(
+                "PROFILE_RUNTIME_SAVED",
+                {
+                    "trader_id": profile.trader_id or profile.profile_name,
+                    "machine_id": machine.machine_id,
+                    "engine_version": ENGINE_VERSION,
+                    **prefs_snapshot(profile),
+                },
+            )
+            return {"ok": True, "profile": profile.to_dict(), "mode": "runtime"}
+
+        if (
+            has_active
+            and existing is not None
+            and sig
+            and policy_fields_equal(profile, existing)
+        ):
+            if not _lease_ok() and not (is_dev() and not admin_url):
+                raise HTTPException(400, "license lease expired")
+            save_profile_raw(profile)
+            append_audit(
+                "PROFILE_RUNTIME_SAVED",
+                {
+                    "trader_id": profile.trader_id or profile.profile_name,
+                    "machine_id": machine.machine_id,
+                    "engine_version": ENGINE_VERSION,
+                    **prefs_snapshot(profile),
+                },
+            )
+            return {"ok": True, "profile": profile.to_dict(), "mode": "runtime"}
+
+        try:
+            draft = save_profile_draft(profile)
+        except ProfileError as exc:
+            raise HTTPException(400, str(exc)) from exc
+        append_audit(
+            "PROFILE_SAVED",
+            {
+                "trader_id": draft.trader_id or draft.profile_name,
+                "machine_id": machine.machine_id,
+                "engine_version": ENGINE_VERSION,
+                "draft": True,
+                **prefs_snapshot(draft),
+            },
+        )
         return {"ok": True, "draft": draft.to_dict(), "mode": "draft"}
 
     @app.post("/api/profile/submit")
@@ -287,13 +396,7 @@ def create_app() -> FastAPI:
     @app.post("/api/calibrate")
     async def api_calibrate():
         _require_stopped()
-        try:
-            profile = load_profile()
-        except ProfileError:
-            try:
-                profile = load_profile_draft()
-            except ProfileError as exc:
-                raise HTTPException(400, str(exc)) from exc
+        profile = _require_authorized()
         machine = load_or_create_machine()
         cfg = config_from_profile(profile, machine)
         try:
@@ -304,6 +407,20 @@ def create_app() -> FastAPI:
         machine.send_input_y = y
         save_machine(machine)
         return {"ok": True, "send_input_x": x, "send_input_y": y}
+
+    @app.post("/api/test-click")
+    async def api_test_click():
+        _require_stopped()
+        profile = _require_authorized()
+        machine = load_or_create_machine()
+        cfg = config_from_profile(profile, machine)
+        try:
+            from send import SendError, click_only
+
+            click_only(cfg)
+        except SendError as exc:
+            raise HTTPException(400, str(exc)) from exc
+        return {"ok": True}
 
     @app.post("/api/test-send-target")
     async def api_test_send_target():

@@ -21,11 +21,11 @@ Windows에서 채권 채팅 호가를 감시하고, Excel PnL 임계값을 만�
 ### 1.1 하는 일
 
 1. Trader Profile(+ machine 좌표)과 MODE 프리셋으로 소스·전송 대상을 정한다.
-2. Profile의 instrument / looking_for / qty / threshold / yield·pnl 셀을 사용한다.
+2. **Policy(서명·승인):** Name, Chat Title, Mode, Loop, Excel workbook/sheet, message template. **Runtime(STOP 후 Save, 재승인 없음):** instrument / looking_for / qty / threshold / yield_prefix / Input·Output cell.
 3. 채팅에서 **신규 라인**만 골라 호가 파싱한다.
 4. yield 셀에 쓰고 PnL을 읽은 뒤 sanity band·evaluate한다.
 5. 조건이 맞으면 side-flip 확정 문자열을 전송 창에 붙여 넣고 Enter한다.
-6. 상태는 `%LOCALAPPDATA%\KBondWatcher\runtime_status.json` + 웹 Status에 반영한다.
+6. 상태는 `%LOCALAPPDATA%\KBondWatcher\runtime_status.json` + 웹 Status에 반영한다. Audit에 prefs 스냅샷이 포함된다.
 
 ### 1.2 하지 않는 일
 
@@ -93,7 +93,7 @@ main.py --serve
 |------|------|------|
 | 1 | KBond 분리창 (`kbond_chat_title`) | 같은 창 |
 | 2 | 동일 | Notepad (`메모장`) |
-| 3 | FORESTBOND (UIA Text) | Notepad |
+| 3 | FORESTBOND (UIA Text). 세션 고점보다 개수가 늘어난 줄만 신규. 깜빡임 복원은 재전송 없음 | Notepad |
 
 설정은 Profile + `machine.json` + `DeveloperDefaults` (poll, sanity band, send pauses). `.env` / VBA는 사용하지 않는다.
 

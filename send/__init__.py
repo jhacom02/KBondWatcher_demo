@@ -1,6 +1,7 @@
 from .ui import (
     SendError,
     activate_window,
+    click_only,
     diagnose,
     ensure_target_window,
     find_target_window,
@@ -11,6 +12,7 @@ from .ui import (
 __all__ = [
     "SendError",
     "activate_window",
+    "click_only",
     "diagnose",
     "ensure_target_window",
     "find_target_window",

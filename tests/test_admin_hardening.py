@@ -14,7 +14,7 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from app.crypto_sign import admin_sign_payload
+from app.license import sign_profile_dict
 from admin import server as admin_server
 from admin.server import fmt_pilot_expires, fmt_ts, init_db
 
@@ -64,9 +64,23 @@ def _seed_signed_trader(trader_id: str = "t1", *, disabled: int = 0) -> dict:
         "profile_name": trader_id,
         "trader_id": trader_id,
         "profile_version": 2,
+        "profile_schema_version": 1,
         "instrument": "25-10",
+        "looking_for": "BID",
+        "required_qty": 100,
+        "threshold": -1000,
+        "threshold_op": "<=",
+        "excel_workbook": r"C:\Trading\bond.xlsm",
+        "excel_sheet": "Sheet1",
+        "yield_input_cell": "D19",
+        "pnl_cell": "F22",
+        "yield_prefix": 3,
+        "mode": 2,
+        "kbond_chat_title": "room",
+        "sent_after": "exit",
+        "message_template": "{instrument} {confirm_token} ㅎㅈ",
     }
-    sig = admin_sign_payload(profile)
+    sig = sign_profile_dict(profile)
     with admin_server._connect() as conn:
         conn.execute(
             "INSERT INTO traders(trader_id, disabled, min_engine_version, profile_json, "

@@ -12,8 +12,11 @@
 # [ ] Dev: local issue_lease works; Pilot: local issue_lease raises
 # [ ] Lease TTL default 7d; Admin refuses reissue after pilot_expires_at (absolute window)
 # [ ] Lease binds device_id+trader_id+profile_version+min_engine+expires_at+enabled (no exact engine_version)
-# [ ] Profile: Local Web saves draft only when Admin URL set; submit → Admin approve → apply
-# [ ] Tampered profile.json or .sig fails START + PROFILE_REJECTED / LICENSE_REJECTED audit
+# [ ] Signature covers policy_payload only; mutable change keeps sig valid; locked tamper fails START
+# [ ] Locked fields (name/chat/mode/loop/excel workbook·sheet/template): draft Submit→Approve; runtime fields (instrument/looking/qty/threshold/yield_prefix/input·output cell): STOP→Save without re-approve
+# [ ] After engine upgrade from full-profile sig: re-Submit/Approve once (no dual-verify)
+# [ ] PROFILE_RUNTIME_SAVED / START·STOP·ERROR audit include prefs snapshot
+# [ ] Tampered locked fields or .sig fails START + PROFILE_REJECTED / LICENSE_REJECTED audit
 # [ ] Past demo_expiry.txt date blocks START / policy poll soft STOP
 # [ ] No KBOND_SIGNING_PUBLIC_KEY (and no public key file) → verify fails immediately
 #

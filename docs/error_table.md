@@ -29,16 +29,35 @@
 | Loop | `sent_after must be exit or loop` | | exit/loop |
 | MODE 1 + loop | `sent_after must be exit when mode is 1` | Mode 1은 exit만 | exit로 변경 |
 | 감시 중 프로필 변경 | `stop watcher before changing profile` | START 중 Save/Submit/Calibrate 금지 | STOP 후 재시도 |
+| Runtime Save | `Runtime saved (no re-approve) · …` | 잠금 필드 동일 → `profile.json`만 갱신, 서명·version 유지 | START 가능; Admin 재승인 불필요 |
+| Draft Save | `Draft saved — Submit & Admin Approve…` | 잠금 필드 변경 또는 미승인 | Submit→Admin Approve→적용 |
+| 엔진 업그레이드 후 서명 거부 | `profile signature invalid` | policy 전용 서명으로 전환됨 | 한 번 재 Submit→Approve |
 | Admin URL 없음 | `KBOND_ADMIN_URL required` | Submit에 Admin 필요 | start.bat/환경에 URL 설정, 개발자 확인 |
 | draft 없음 | `no draft: …` | Submit 전 Save 필요 | Save 후 Submit |
 | Admin HTTP/네트워크 | `admin HTTP {code}: …` / `admin request failed: …` | Admin 거부·끊김 | Admin 상태·URL·HTTPS 확인; 지속 시 개발자 |
 | Pilot HTTP URL | `pilot mode requires HTTPS KBOND_ADMIN_URL` | Pilot는 HTTPS만 | URL을 HTTPS로 |
 | 열린 워크북 0개 | `No open Excel workbook.` | Find 결과 | Excel에서 대상 xlsm 연 뒤 Find |
 | schema 불일치 | `unsupported profile_schema_version …` | 엔진·프로필 포맷 불일치 | 개발자 패치/재배포 |
+| Not Authorized | `profile not authorized` | 서명 미적용 | Profile Submit→Approve→자동 apply 대기 |
+| Settings lease 만료 | `license lease expired` | lease 만료 | Admin 켜고 lease 갱신 후 Save |
+| Settings 잠금 변경 | `locked fields cannot change in Settings` | Settings는 runtime만 | Profile 탭에서 Submit |
+| Profile Revert | `↺ Revert` (Not Authorized·수정 시) | 마지막 서명본 또는 기본값 | 클릭 시 폼만 복원 (Save 전) |
+| Settings Revert | `↺ Revert` (저장 후 수정 시) | 마지막 저장 runtime | 클릭 시 Settings 폼 복원 |
+
+---
+
+## Watcher / Coordinate
+
+| 조건 | 메시지 | 의미 | 대응 |
+|------|--------|------|------|
+| Test Click 성공 | `Test click ok` | 좌표 클릭만 (붙여넣기 없음) | |
+| Calibrate/Test while START | `stop watcher before changing profile` | 감시 중 좌표 변경 금지 | STOP 후 |
+| Not Authorized + START/STOP/좌표 | `profile not authorized` | 승인 전 Watcher 조작 불가 | Profile 승인 |
 
 ---
 
 ## START / STOP (formFlash status)
+
 
 | 조건 | 메시지 | 의미 | 대응 |
 |------|--------|------|------|
@@ -130,3 +149,4 @@
 | 전송 성공 exit | SENT 후 종료 | `sent_after=exit` | 다시 보려면 START |
 | 전송 성공 loop | SENT → WATCHING | 데모 loop | STOP으로만 완전 중단 |
 | 프로필 동기화 대기 | status에 승인/적용 안내 | Admin Approve 대기 | Approve 후 약 60초 대기 |
+| MODE 3 UIA 고점 | (변화 없음) | 세션 고점보다 문구 개수가 늘어난 줄만 검토. 칸 깜빡임 복원은 재전송 없음 | 정상 |

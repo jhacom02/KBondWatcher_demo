@@ -9,7 +9,7 @@ from typing import Optional, Sequence, TypeVar
 
 logger = logging.getLogger("kbond_watcher")
 
-WATERMARK_WINDOW = 2000
+WATERMARK_WINDOW = 1000
 
 _T = TypeVar("_T")
 

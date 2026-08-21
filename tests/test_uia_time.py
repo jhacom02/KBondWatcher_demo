@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import sys
+from collections import Counter
 from pathlib import Path
 
 import pytest
@@ -200,6 +201,48 @@ def test_uia_get_new_message_lines_same_snapshot_is_empty() -> None:
     second = reader.get_new_message_lines()
     assert first == []
     assert second == []
+
+
+def test_new_lines_after_high_water_ignores_count_restore() -> None:
+    prev = [source_line("chrome"), source_line("25-10 72+")]
+    gone = [source_line("chrome")]
+    back = [source_line("chrome"), source_line("25-10 72+")]
+    max_counts: Counter[str] = Counter({"chrome": 1, "25-10 72+": 1})
+    assert new_lines_after(prev, gone, max_counts) == []
+    assert new_lines_after(gone, back, max_counts) == []
+
+
+def test_new_lines_after_high_water_still_sees_extra_copy() -> None:
+    prev = [source_line("chrome"), source_line("25-10 72+")]
+    now = [
+        source_line("chrome"),
+        source_line("25-10 72+"),
+        source_line("25-10 72+"),
+    ]
+    max_counts: Counter[str] = Counter({"chrome": 1, "25-10 72+": 1})
+    assert _keys(new_lines_after(prev, now, max_counts)) == ["25-10 72+"]
+
+
+def test_uia_get_new_message_lines_flicker_does_not_reemit() -> None:
+    reader = UiaSourceReader("FORESTBOND")
+    quote = source_line("25-10 72+")
+    chrome = source_line("chrome")
+    snapshots: list[list] = [
+        [chrome, quote],
+        [chrome],
+        [chrome, quote],
+    ]
+    state = {"n": 0}
+
+    def _visible() -> list:
+        idx = min(state["n"], len(snapshots) - 1)
+        state["n"] += 1
+        return list(snapshots[idx])
+
+    reader.get_visible_message_lines = _visible  # type: ignore[method-assign]
+    reader.initialize_watermark(False)
+    assert reader.get_new_message_lines() == []
+    assert reader.get_new_message_lines() == []
 
 
 def test_uia_get_new_message_lines_returns_suffix() -> None:
