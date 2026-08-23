@@ -3,28 +3,47 @@
 from __future__ import annotations
 
 import html
-import re
 from pathlib import Path
 
 import streamlit as st
 
 ROOT = Path(__file__).resolve().parent
-VIDEO_PATH = ROOT / "video" / "2026-08-20_before_close_cut.mp4"
+VIDEO_PATH = ROOT / "attachment" / "2026-08-20_before_close_cut.mp4"
 CSS_PATH = ROOT / "static" / "styles.css"
+REPORT_NAME = "KBondWatcher_Technical_Report_v1.4.pdf"
+REPORT_PATH = ROOT / "attachment" / REPORT_NAME
 
 ENGINE_VERSION = "0.3.1"
-DEMO_MSG = "※ 본 웹은 데모 시연용 웹입니다. 다운로드 및 설치 문의 부탁드립니다."
+DEMO_MSG = "본 웹은 데모 시연용 웹입니다."
+DEMO_BANNER = "※ 본 웹은 데모 시연용 웹입니다. 다운로드 및 설치 후 실사용 가능합니다."
 COORD_IDLE = "'Set Click Position' 버튼 클릭 후 입력 좌표를 설정하세요."
-CELL_RE = re.compile(r"^[A-Za-z]{1,3}\d{1,7}$")
 ALLOWED = ("25-10", "25-4", "25-8", "25-5", "25-11")
 MODE_OPTIONS = (
     "1 - KBond / KBond",
     "2 - KBond / Notepad",
     "3 - Forest / Notepad",
 )
+PROFILE_KEYS = (
+    "profile_name",
+    "kbond_chat_title",
+    "excel_workbook",
+    "excel_sheet",
+    "mode",
+    "sent_after",
+)
+SETTINGS_KEYS = (
+    "instrument",
+    "required_qty",
+    "looking_for",
+    "threshold_op",
+    "threshold",
+    "yield_input_cell",
+    "pnl_cell",
+    "yield_prefix",
+)
 
 st.set_page_config(
-    page_title="KBondWatcher",
+    page_title="KBondWatcher Demo",
     layout="centered",
     initial_sidebar_state="collapsed",
 )
@@ -32,18 +51,17 @@ st.set_page_config(
 
 def _defaults() -> dict:
     return {
-        "active_tab": "Demo",
-        "profile_name": "",
+        "profile_name": "Hannah",
         "kbond_chat_title": "[채권] 블커본드",
-        "excel_workbook": "",
-        "excel_sheet": "",
+        "excel_workbook": "C:/Users/user/Trading/Trading.xlsm",
+        "excel_sheet": "Main",
         "mode": MODE_OPTIONS[1],
-        "sent_after": "exit",
+        "sent_after": "one-shot",
         "instrument": "25-10",
         "required_qty": 100,
         "looking_for": "BID",
         "threshold_op": "<=",
-        "threshold": 0,
+        "threshold": -1000000,
         "yield_input_cell": "A1",
         "pnl_cell": "B1",
         "yield_prefix": "3",
@@ -67,13 +85,7 @@ def init_state() -> None:
 
 
 def inject_css() -> None:
-    css = _css_text()
-    st.markdown(f"<style>{css}</style>", unsafe_allow_html=True)
-
-
-@st.cache_resource
-def _css_text() -> str:
-    return CSS_PATH.read_text(encoding="utf-8")
+    st.markdown(f"<style>{CSS_PATH.read_text(encoding='utf-8')}</style>", unsafe_allow_html=True)
 
 
 def flash(slot: str, msg: str, err: bool = True) -> None:
@@ -91,6 +103,57 @@ def render_msg(slot: str) -> None:
 def field_label(text: str, required: bool = False) -> None:
     req = ' <span class="req">*</span>' if required else ""
     st.markdown(f'<div class="field-label">{html.escape(text)}{req}</div>', unsafe_allow_html=True)
+
+
+def form_footer(
+    slot: str,
+    buttons: list[tuple[str, str]],
+    btn_w: float = 1,
+) -> list[bool]:
+    n = len(buttons)
+    cols = st.columns([max(3, 8 - int(n * btn_w))] + [btn_w] * n)
+    clicks: list[bool] = []
+    for i, (label, key) in enumerate(buttons):
+        with cols[i + 1]:
+            clicks.append(st.button(label, key=key, use_container_width=True))
+    if any(clicks):
+        flash(slot, DEMO_MSG, True)
+    with cols[0]:
+        st.markdown('<div class="form-footer-row"></div>', unsafe_allow_html=True)
+        render_msg(slot)
+    return clicks
+
+
+def section_head(title_html: str, revert_key: str | None = None, btn_cols: int = 2) -> bool:
+    if revert_key is None:
+        st.markdown(
+            f'<div class="section-head"><h2>{title_html}</h2></div>',
+            unsafe_allow_html=True,
+        )
+        return False
+    cols = st.columns([7, 1])
+    with cols[0]:
+        st.markdown(
+            f'<div class="section-head"><h2>{title_html}</h2></div>',
+            unsafe_allow_html=True,
+        )
+    with cols[1]:
+        st.markdown('<div class="revert-anchor"></div>', unsafe_allow_html=True)
+        return st.button("↺ Revert", key=revert_key)
+
+
+def reset_keys(keys: tuple[str, ...]) -> None:
+    defaults = _defaults()
+    for key in keys:
+        st.session_state[key] = defaults[key]
+
+
+def reset_profile() -> None:
+    reset_keys(PROFILE_KEYS)
+
+
+def reset_settings() -> None:
+    reset_keys(SETTINGS_KEYS)
 
 
 def mode_number() -> int:
@@ -128,105 +191,15 @@ def position_check_text() -> str:
     return f"만약 {cell}이/가 {thr} {cmp}이면, {inst} {qty}억 {side}"
 
 
-def validate_profile() -> str:
-    s = st.session_state
-    if not str(s.get("profile_name", "")).strip():
-        return "profile_name is required"
-    if s.get("instrument") not in ALLOWED:
-        return "instrument must be one of 25-10, 25-4, 25-8, 25-5, 25-11"
-    if s.get("looking_for") not in ("BID", "OFFER"):
-        return "looking_for must be BID or OFFER"
-    try:
-        qty = float(s.get("required_qty"))
-    except (TypeError, ValueError):
-        qty = 0
-    if not (qty > 0):
-        return "required_qty must be > 0"
-    try:
-        thr = float(s.get("threshold"))
-        if thr != thr:
-            return "threshold must be numeric"
-    except (TypeError, ValueError):
-        return "threshold must be numeric"
-    if s.get("threshold_op") not in ("<=", ">="):
-        return "threshold_op must be <= or >="
-    wb = str(s.get("excel_workbook") or "").strip()
-    if not wb:
-        return "excel_workbook FullName is required"
-    if "\\" not in wb and "/" not in wb:
-        return "excel_workbook must be a FullName path, not a bare Name"
-    if not str(s.get("excel_sheet") or "").strip():
-        return "excel_sheet is required"
-    y_cell = str(s.get("yield_input_cell") or "").strip()
-    p_cell = str(s.get("pnl_cell") or "").strip()
-    if not CELL_RE.test(y_cell):
-        return "yield_input_cell must be a cell like D19"
-    if not CELL_RE.test(p_cell):
-        return "pnl_cell must be a cell like D19"
-    if str(s.get("yield_prefix")) not in ("3", "4"):
-        return "yield_prefix must be 3 or 4"
-    mode = mode_number()
-    if mode not in (1, 2, 3):
-        return "mode must be 1, 2, or 3"
-    if mode in (1, 2) and not str(s.get("kbond_chat_title") or "").strip():
-        return "kbond_chat_title is required for MODE 1/2"
-    loop = "exit" if mode == 1 else s.get("sent_after")
-    if loop not in ("exit", "loop"):
-        return "sent_after must be exit or loop"
-    if mode == 1 and loop != "exit":
-        return "sent_after must be exit when mode is 1"
-    return ""
-
-
-def validate_settings() -> str:
-    s = st.session_state
-    if s.get("instrument") not in ALLOWED:
-        return "instrument must be one of 25-10, 25-4, 25-8, 25-5, 25-11"
-    if s.get("looking_for") not in ("BID", "OFFER"):
-        return "looking_for must be BID or OFFER"
-    try:
-        qty = float(s.get("required_qty"))
-    except (TypeError, ValueError):
-        qty = 0
-    if not (qty > 0):
-        return "required_qty must be > 0"
-    try:
-        thr = float(s.get("threshold"))
-        if thr != thr:
-            return "threshold must be numeric"
-    except (TypeError, ValueError):
-        return "threshold must be numeric"
-    if s.get("threshold_op") not in ("<=", ">="):
-        return "threshold_op must be <= or >="
-    if str(s.get("yield_prefix")) not in ("3", "4"):
-        return "yield_prefix must be 3 or 4"
-    y_cell = str(s.get("yield_input_cell") or "").strip()
-    p_cell = str(s.get("pnl_cell") or "").strip()
-    if not CELL_RE.test(y_cell):
-        return "yield_input_cell must be a cell like D19"
-    if not CELL_RE.test(p_cell):
-        return "pnl_cell must be a cell like D19"
-    return ""
-
-
 def render_demo() -> None:
     with st.container(border=True):
         st.markdown(
-            '<div class="section-head"><h2>Demo</h2>'
+            '<div class="section-head"><h2>Watch Demo</h2>'
             '<span class="demo-kicker">Walkthrough · 2026-08-20</span></div>',
             unsafe_allow_html=True,
         )
         st.markdown(
-            '<p class="muted">장외 호가 감시 → 조건 판정 → 확정 메시지 전송 루프를 '
-            "장 마감 전 환경에서 기록한 시연입니다. 자동매매가 아닙니다.</p>",
-            unsafe_allow_html=True,
-        )
-        st.markdown(
-            '<div class="demo-meta">'
-            '<div><div class="lbl">Engine</div><div class="val">0.3.1</div></div>'
-            '<div><div class="lbl">Loop</div><div class="val">Confirm-Judge-Act</div></div>'
-            '<div><div class="lbl">Latency</div><div class="val">~1s loop</div></div>'
-            "</div>",
+            '<p class="muted">본 영상은 웹이 아닌 엑셀을 인터페이스로 한 것이며, 루프 반복 실행한 결과입니다. (Mode: 3, Loop: loop)</p>',
             unsafe_allow_html=True,
         )
         if VIDEO_PATH.is_file():
@@ -237,27 +210,44 @@ def render_demo() -> None:
                 unsafe_allow_html=True,
             )
         st.markdown(
-            '<p class="demo-caption">Before close · desktop control</p>',
+            '<div class="demo-meta">'
+            '<div><div class="lbl">Total Latency</div><div class="val">0.93s</div></div>'
+            '<div><div class="lbl">Sending Latency</div><div class="val">0.75s</div></div>'
+            '<div><div class="lbl">Excel Calculation Latency</div><div class="val">0.10s</div></div>'
+            "</div>",
             unsafe_allow_html=True,
         )
+
+    with st.container(border=True):
+        section_head("Technical Report")
+        if REPORT_PATH.is_file():
+            st.markdown('<div class="report-dl-anchor"></div>', unsafe_allow_html=True)
+            st.download_button(
+                label=REPORT_NAME,
+                data=REPORT_PATH.read_bytes(),
+                file_name=REPORT_NAME,
+                mime="application/pdf",
+                key="btn_dl_report",
+            )
+        else:
+            st.markdown(
+                f'<p class="form-msg err">{html.escape(f"{REPORT_NAME} not found")}</p>',
+                unsafe_allow_html=True,
+            )
 
 
 def render_profile() -> None:
     if mode_number() == 1:
-        st.session_state.sent_after = "exit"
+        st.session_state.sent_after = "one-shot"
 
     with st.container(border=True):
-        head_l, head_r = st.columns([4, 1])
-        with head_l:
-            st.markdown(
-                '<div class="section-head"><h2>Profile - '
-                '<span class="auth-label">Not Authorized</span></h2></div>',
-                unsafe_allow_html=True,
-            )
-        with head_r:
-            st.markdown('<div class="revert-anchor" id="revert-profile-anchor"></div>', unsafe_allow_html=True)
-            if st.button("↺ Revert", key="btn_profile_revert"):
-                flash("profile", DEMO_MSG, True)
+        if section_head(
+            'Profile - <span class="auth-label">Not Authorized</span>',
+            "btn_profile_revert",
+        ):
+            reset_profile()
+            flash("profile", DEMO_MSG, True)
+            st.rerun()
 
         c1, c2 = st.columns(2)
         with c1:
@@ -272,17 +262,12 @@ def render_profile() -> None:
         c3, c4 = st.columns(2)
         with c3:
             field_label("Excel Directory", True)
-            wb, find = st.columns([4, 1])
-            with wb:
-                st.text_input(
-                    "excel_workbook",
-                    key="excel_workbook",
-                    label_visibility="collapsed",
-                    placeholder="FullName path",
-                )
-            with find:
-                if st.button("Find", key="btn_find"):
-                    flash("profile", DEMO_MSG, True)
+            st.text_input(
+                "excel_workbook",
+                key="excel_workbook",
+                label_visibility="collapsed",
+                placeholder="FullName path",
+            )
         with c4:
             field_label("Sheet Name", True)
             st.text_input("excel_sheet", key="excel_sheet", label_visibility="collapsed")
@@ -295,69 +280,56 @@ def render_profile() -> None:
             field_label("Loop", True)
             st.selectbox(
                 "sent_after",
-                ("exit", "loop"),
+                ("one-shot", "loop"),
                 key="sent_after",
                 label_visibility="collapsed",
                 disabled=(mode_number() == 1),
-                help="Mode 1 uses exit only",
+                help="Mode 1 uses one-shot only",
             )
 
-        foot_msg, foot_btn = st.columns([3, 2])
-        with foot_btn:
-            b1, b2 = st.columns(2)
-            with b1:
-                save = st.button("Save", key="btn_save_profile")
-            with b2:
-                submit = st.button("Submit", key="btn_submit_profile")
-        if save or submit:
-            err = validate_profile()
-            flash("profile", err or DEMO_MSG, True)
-        with foot_msg:
-            render_msg("profile")
+        form_footer(
+            "profile",
+            [("Save", "btn_save_profile"), ("Submit", "btn_submit_profile")],
+        )
 
 
 def render_watcher() -> None:
-    st.markdown(
-        '<p class="flash msg">탭을 닫거나 새로고침하면 감시가 중단됩니다.</p>',
-        unsafe_allow_html=True,
-    )
+    thr = fmt_threshold(st.session_state.get("threshold", -1000000))
+    qty = st.session_state.get("required_qty", 100)
+    last_calc = fmt_threshold(-1458910)
 
     with st.container(border=True):
-        st.markdown("<h2>Status</h2>", unsafe_allow_html=True)
-        b1, b2, _ = st.columns([1, 1, 4])
+        section_head("Status")
+        b1, b2, msg = st.columns([1, 1, 4])
         with b1:
             st.markdown('<div id="start-btn-anchor"></div>', unsafe_allow_html=True)
-            if st.button("START", key="btn_start"):
+            if st.button("START", key="btn_start", use_container_width=True):
                 flash("status", DEMO_MSG, True)
         with b2:
             st.markdown('<div id="stop-btn-anchor"></div>', unsafe_allow_html=True)
-            if st.button("STOP", key="btn_stop"):
+            if st.button("STOP", key="btn_stop", use_container_width=True):
                 flash("status", DEMO_MSG, True)
+        with msg:
+            st.markdown('<div class="form-footer-row"></div>', unsafe_allow_html=True)
+            render_msg("status")
         st.markdown(
             '<div class="status-grid">'
-            '<div class="lbl">Target</div><div class="val">—</div>'
-            '<div class="lbl">Threshold</div><div class="val">—</div>'
-            '<div class="lbl">Status</div><div class="val">—</div>'
-            '<div class="lbl">Looking For</div><div class="val">—</div>'
-            '<div class="lbl">Last Quote</div><div class="val">—</div>'
-            '<div class="lbl">Last Calculation</div><div class="val">—</div>'
-            '<div class="lbl">Last Action</div><div class="val">—</div>'
+            '<div class="lbl">Status</div><div class="val">STOPPED</div>'
+            f'<div class="lbl">Target</div><div class="val">{html.escape(str(st.session_state.get("instrument", "25-10")))}</div>'
+            f'<div class="lbl">Quantity</div><div class="val">{html.escape(str(qty))}</div>'
+            f'<div class="lbl">Looking For</div><div class="val">{html.escape(str(st.session_state.get("looking_for", "BID")))}</div>'
+            f'<div class="lbl">Threshold</div><div class="val">{html.escape(thr)}</div>'
+            '<div class="lbl">Last Quote</div><div class="val">25-10 74+</div>'
+            f'<div class="lbl">Last Calculation</div><div class="val">{html.escape(last_calc)}</div>'
+            '<div class="lbl">Last Action</div><div class="val">(16:05:16) Message Sent: 25-10 74- ㅎㅈ</div>'
             "</div>",
             unsafe_allow_html=True,
         )
-        render_msg("status")
-
     with st.container(border=True):
-        head_l, head_r = st.columns([4, 1])
-        with head_l:
-            st.markdown(
-                '<div class="section-head"><h2>Settings</h2></div>',
-                unsafe_allow_html=True,
-            )
-        with head_r:
-            st.markdown('<div class="revert-anchor" id="revert-settings-anchor"></div>', unsafe_allow_html=True)
-            if st.button("↺ Revert", key="btn_settings_revert"):
-                flash("settings", DEMO_MSG, True)
+        if section_head("Settings", "btn_settings_revert"):
+            reset_settings()
+            flash("settings", DEMO_MSG, True)
+            st.rerun()
 
         s1, s2 = st.columns(2)
         with s1:
@@ -385,7 +357,7 @@ def render_watcher() -> None:
             )
         with s4:
             field_label("Threshold", True)
-            op, thr = st.columns([1, 2])
+            op, thr_col = st.columns([1, 2])
             with op:
                 st.selectbox(
                     "threshold_op",
@@ -393,7 +365,7 @@ def render_watcher() -> None:
                     key="threshold_op",
                     label_visibility="collapsed",
                 )
-            with thr:
+            with thr_col:
                 st.number_input(
                     "threshold",
                     step=1,
@@ -425,16 +397,10 @@ def render_watcher() -> None:
                 unsafe_allow_html=True,
             )
 
-        foot_msg, foot_btn = st.columns([3, 1])
-        with foot_btn:
-            if st.button("Save", key="btn_save_settings"):
-                err = validate_settings()
-                flash("settings", err or DEMO_MSG, True)
-        with foot_msg:
-            render_msg("settings")
+        form_footer("settings", [("Save", "btn_save_settings")])
 
     with st.container(border=True):
-        st.markdown("<h2>Coordinate</h2>", unsafe_allow_html=True)
+        section_head("Coordinate")
         d1, d2 = st.columns(2)
         with d1:
             field_label("Mode")
@@ -472,47 +438,40 @@ def render_watcher() -> None:
                 label_visibility="collapsed",
             )
 
-        foot_msg, foot_btn = st.columns([3, 2])
-        with foot_btn:
-            b1, b2 = st.columns(2)
-            with b1:
-                if st.button("Set Click Position", key="btn_calibrate"):
-                    flash("coord", DEMO_MSG, True)
-            with b2:
-                if st.button("Test Click", key="btn_test_click"):
-                    flash("coord", DEMO_MSG, True)
-        with foot_msg:
-            render_msg("coord")
+        form_footer(
+            "coord",
+            [
+                ("Set Click Position", "btn_calibrate"),
+                ("Test Click", "btn_test_click"),
+            ],
+            btn_w=1.9,
+        )
 
 
 def main() -> None:
     init_state()
     inject_css()
 
-    st.markdown("<h1>KBondWatcher</h1>", unsafe_allow_html=True)
+    st.markdown("<h1>KBondWatcher Demo</h1>", unsafe_allow_html=True)
     st.markdown(
-        '<p class="flash msg">KBondWatcher는 장외 호가를 감시하고 특정 조건에 부합할 시 '
-        "확정 메시지를 전송하는 엔진입니다.</p>",
+        '<p class="flash msg">KBondWatcher는 장외 호가를 감시하고 특정 조건에 부합할 시 확정 메시지를 전송하는 엔진입니다.</p>',
         unsafe_allow_html=True,
     )
     st.markdown(
-        '<p class="flash msg">자동매매 시스템이 아닌, 사람이 하던 확인-판정-액션 루프를 '
-        "약 1초 이내로 줄여주는 데스크톱 제어 시스템입니다.</p>",
+        '<p class="flash msg">자동매매 시스템이 아닌, 사람이 하던 확인-판정-액션 루프를 약 1초 이내로 줄여주는 데스크톱 제어 시스템입니다.</p>',
+        unsafe_allow_html=True,
+    )
+    st.markdown(
+        f'<p class="flash msg err">{html.escape(DEMO_BANNER)}</p>',
         unsafe_allow_html=True,
     )
 
-    tab = st.radio(
-        "section",
-        ("Demo", "Profile", "Watcher"),
-        horizontal=True,
-        label_visibility="collapsed",
-        key="active_tab",
-    )
-    if tab == "Demo":
+    demo_tab, profile_tab, watcher_tab = st.tabs(["Demo", "Profile", "Watcher"])
+    with demo_tab:
         render_demo()
-    elif tab == "Profile":
+    with profile_tab:
         render_profile()
-    else:
+    with watcher_tab:
         render_watcher()
 
     st.markdown(

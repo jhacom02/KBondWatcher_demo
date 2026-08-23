@@ -11,12 +11,12 @@
   --required: #e07070;
   --radius: 6px;
   --font: "Segoe UI", "Malgun Gothic", sans-serif;
-  --fs-xs: 11px;
-  --fs-sm: 12px;
-  --fs-base: 13px;
-  --fs-md: 14px;
+  --fs-caption: 10pt;
+  --fs-meta: 9pt;
+  --fs-tab: 15px;
   --fs-lg: 20px;
   --fs-xl: 32px;
+  --ctrl-h: 38px;
 }
 
 html, body, .stApp, [data-testid="stAppViewContainer"] {
@@ -47,11 +47,11 @@ footer,
 }
 
 div[data-testid="stVerticalBlock"] {
-  gap: 0.35rem;
+  gap: 0.6rem;
 }
 
 h1 {
-  margin: 0 0 16px !important;
+  margin: 0 0 12px !important;
   font-size: var(--fs-xl) !important;
   font-weight: 600 !important;
   letter-spacing: 0.02em;
@@ -67,11 +67,12 @@ h2 {
 
 .flash {
   min-height: 0.6em;
-  margin: 0 0 12px;
-  font-size: var(--fs-sm);
+  margin: 10px 0 12px;
+  font-size: var(--fs-caption) !important;
   line-height: 1.45;
 }
 .flash.msg { color: var(--text-dim); }
+.flash.msg.err { color: var(--danger); }
 
 .section-head {
   display: flex;
@@ -89,9 +90,17 @@ h2 {
 }
 
 .field-label {
-  font-size: var(--fs-sm);
+  font-size: var(--fs-caption) !important;
+  font-weight: 400 !important;
   color: var(--text-muted);
-  margin: 6px 0 2px;
+  margin: 14px 0 10px;
+  line-height: 1.35;
+  display: block;
+  min-height: 1.35em;
+}
+.field-label,
+.field-label * {
+  font-weight: 400 !important;
 }
 .field-label .req {
   color: var(--required);
@@ -99,17 +108,33 @@ h2 {
 }
 
 .form-msg {
-  margin: 8px 0 0;
+  margin: 0;
   min-height: 1.2em;
-  font-size: var(--fs-sm);
+  font-size: var(--fs-caption) !important;
   color: var(--text-dim);
   word-break: break-word;
 }
 .form-msg.err { color: var(--danger); }
 
+div[data-testid="stHorizontalBlock"]:has(.form-footer-row) {
+  align-items: center !important;
+  gap: 0.5rem !important;
+}
+
+div[data-testid="stHorizontalBlock"]:has(#start-btn-anchor) {
+  align-items: center !important;
+  gap: 1.25rem !important;
+}
+div[data-testid="stHorizontalBlock"]:has(#start-btn-anchor) > [data-testid="column"]:nth-child(1),
+div[data-testid="stHorizontalBlock"]:has(#start-btn-anchor) > [data-testid="column"]:nth-child(2) {
+  flex: 0 0 auto !important;
+  width: auto !important;
+  min-width: 0 !important;
+}
+
 .muted {
   margin: 0 0 12px;
-  font-size: var(--fs-sm);
+  font-size: var(--fs-caption) !important;
   color: var(--text-muted);
   line-height: 1.45;
 }
@@ -119,10 +144,10 @@ h2 {
   grid-template-columns: auto 1fr;
   gap: 8px 12px;
   align-items: center;
-  margin: 8px 0 4px;
+  margin: 8px 0 12px;
 }
 .status-grid .lbl {
-  font-size: var(--fs-sm);
+  font-size: var(--fs-caption) !important;
   color: var(--text-muted);
   white-space: nowrap;
 }
@@ -134,12 +159,13 @@ h2 {
   font-variant-numeric: tabular-nums;
   min-height: 32px;
   color: var(--text);
+  font-size: var(--fs-caption) !important;
 }
 
 .demo-kicker {
-  font-size: var(--fs-sm);
+  font-size: var(--fs-meta) !important;
   color: var(--text-muted);
-  font-weight: 600;
+  font-weight: 400;
   white-space: nowrap;
 }
 
@@ -150,7 +176,7 @@ h2 {
   margin: 0 0 14px;
 }
 .demo-meta .lbl {
-  font-size: var(--fs-sm);
+  font-size: var(--fs-caption) !important;
   color: var(--text-muted);
   margin-bottom: 4px;
 }
@@ -162,70 +188,75 @@ h2 {
   font-variant-numeric: tabular-nums;
   min-height: 32px;
   color: var(--text);
-  font-size: var(--fs-base);
-}
-
-.demo-caption {
-  margin: 8px 0 0;
-  font-size: var(--fs-sm);
-  color: var(--text-dim);
+  font-size: var(--fs-caption) !important;
 }
 
 .readonly-input {
-  padding: 7px 9px;
+  padding: 0 9px;
   background: #0a0e13;
   border: 1px solid var(--border);
   border-radius: var(--radius);
-  color: var(--text-dim);
-  font-size: var(--fs-base);
-  min-height: 32px;
-  line-height: 1.45;
+  color: var(--text-dim) !important;
+  font-size: var(--fs-caption) !important;
+  font-weight: 400 !important;
+  height: var(--ctrl-h);
+  min-height: var(--ctrl-h);
+  max-height: var(--ctrl-h);
+  line-height: var(--ctrl-h);
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
   opacity: 0.85;
   word-break: break-word;
+  margin-top: 0;
+  margin-bottom: 6px;
 }
+
+.footer-meta {
   margin-top: 20px;
-  font-size: var(--fs-xs);
+  font-size: var(--fs-meta) !important;
+  font-weight: 400;
   color: var(--text-dim);
   text-align: center;
   letter-spacing: 0.02em;
 }
 
-[data-testid="stRadio"] {
-  margin: 4px 0 16px;
+[data-testid="stTabs"] {
+  margin: 12px 0 16px;
 }
-[data-testid="stRadio"] > div {
+[data-testid="stTabs"] [data-baseweb="tab-list"] {
   gap: 0 !important;
   border-bottom: 1px solid var(--border);
   background: transparent !important;
 }
-[data-testid="stRadio"] label {
-  padding: 10px 18px 10px !important;
-  margin-bottom: -1px;
-  background: transparent !important;
-  border-bottom: 2px solid transparent;
-}
-[data-testid="stRadio"] label > div:first-child {
-  display: none !important;
-}
-[data-testid="stRadio"] label p {
-  font-size: var(--fs-md) !important;
+[data-testid="stTabs"] button[data-baseweb="tab"] {
+  font-size: var(--fs-tab) !important;
   font-weight: 600 !important;
   color: var(--text-muted) !important;
+  background: transparent !important;
+  border-bottom: 2px solid transparent !important;
+  padding: 10px 18px !important;
+  margin-bottom: -1px;
 }
-[data-testid="stRadio"] label[data-checked="true"],
-[data-testid="stRadio"] label:has(input:checked) {
-  border-bottom-color: var(--accent);
+[data-testid="stTabs"] button[data-baseweb="tab"] p {
+  font-size: var(--fs-tab) !important;
+  font-weight: 600 !important;
+  color: inherit !important;
 }
-[data-testid="stRadio"] label[data-checked="true"] p,
-[data-testid="stRadio"] label:has(input:checked) p {
+[data-testid="stTabs"] button[aria-selected="true"] {
   color: var(--text) !important;
+  border-bottom-color: var(--accent) !important;
+}
+[data-testid="stTabs"] button[data-baseweb="tab"]::before,
+[data-testid="stTabs"] button[data-baseweb="tab"]::after {
+  display: none !important;
 }
 
 [data-testid="stVerticalBlockBorderWrapper"] {
   background: var(--bg-elevated);
   border: 1px solid var(--border) !important;
   border-radius: var(--radius) !important;
-  padding: 8px 6px 4px;
+  padding: 8px 10px 14px;
 }
 
 .stButton > button {
@@ -234,9 +265,15 @@ h2 {
   color: var(--text);
   border-radius: var(--radius);
   font-weight: 600;
-  font-size: var(--fs-base);
-  padding: 8px 14px;
-  min-height: 38px;
+  font-size: var(--fs-caption) !important;
+  padding: 0 14px !important;
+  height: var(--ctrl-h) !important;
+  min-height: var(--ctrl-h) !important;
+  max-height: var(--ctrl-h) !important;
+  line-height: var(--ctrl-h) !important;
+  box-sizing: border-box !important;
+  width: 100%;
+  min-width: 0;
 }
 .stButton > button:hover {
   background: #214060;
@@ -251,6 +288,8 @@ div:has(> #start-btn-anchor) + div button {
   border-color: #269c73 !important;
   color: #ffffff !important;
   min-width: 110px;
+  width: auto !important;
+  margin-right: 0.75rem !important;
 }
 .stElementContainer:has(#start-btn-anchor) + .stElementContainer button:hover,
 .stMarkdown:has(#start-btn-anchor) + div button:hover,
@@ -266,6 +305,7 @@ div:has(> #stop-btn-anchor) + div button {
   border-color: #ad484d !important;
   color: #ffffff !important;
   min-width: 110px;
+  width: auto !important;
 }
 .stElementContainer:has(#stop-btn-anchor) + .stElementContainer button:hover,
 .stMarkdown:has(#stop-btn-anchor) + div button:hover,
@@ -274,16 +314,28 @@ div:has(> #stop-btn-anchor) + div button:hover {
   border-color: #c6585d !important;
 }
 
+.stElementContainer:has(.revert-anchor) + .stElementContainer,
+.stMarkdown:has(.revert-anchor) + div,
+div:has(> .revert-anchor) + div {
+  display: flex !important;
+  justify-content: flex-end !important;
+  width: 100% !important;
+}
 .stElementContainer:has(.revert-anchor) + .stElementContainer button,
 .stMarkdown:has(.revert-anchor) + div button,
 div:has(> .revert-anchor) + div button {
   background: transparent !important;
   border: none !important;
   color: var(--text-muted) !important;
-  font-size: var(--fs-sm) !important;
+  font-size: var(--fs-caption) !important;
   font-weight: 400 !important;
-  min-height: auto;
-  padding: 4px 6px;
+  min-height: auto !important;
+  height: auto !important;
+  max-height: none !important;
+  line-height: 1.35 !important;
+  padding: 4px 0 !important;
+  width: auto !important;
+  white-space: nowrap !important;
   box-shadow: none !important;
 }
 .stElementContainer:has(.revert-anchor) + .stElementContainer button:hover,
@@ -294,14 +346,120 @@ div:has(> .revert-anchor) + div button:hover {
   background: transparent !important;
 }
 
+.stElementContainer:has(.report-dl-anchor) + .stElementContainer button,
+.stMarkdown:has(.report-dl-anchor) + div button,
+div:has(> .report-dl-anchor) + div button,
+.stDownloadButton > button {
+  background: transparent !important;
+  border: none !important;
+  color: var(--accent) !important;
+  font-size: var(--fs-caption) !important;
+  font-weight: 400 !important;
+  min-height: auto !important;
+  height: auto !important;
+  max-height: none !important;
+  line-height: 1.45 !important;
+  padding: 4px 0 !important;
+  width: auto !important;
+  box-shadow: none !important;
+  text-align: left !important;
+  white-space: nowrap !important;
+}
+.stElementContainer:has(.report-dl-anchor) + .stElementContainer button:hover,
+.stMarkdown:has(.report-dl-anchor) + div button:hover,
+div:has(> .report-dl-anchor) + div button:hover,
+.stDownloadButton > button:hover {
+  color: var(--text) !important;
+  text-decoration: underline;
+  background: transparent !important;
+  border: none !important;
+}
+
+[data-testid="stTextInput"],
+[data-testid="stNumberInput"],
+[data-testid="stSelectbox"] {
+  margin-top: 0 !important;
+  margin-bottom: 6px !important;
+}
+
+[data-testid="stWidgetLabel"],
+[data-testid="stTextInput"] label,
+[data-testid="stNumberInput"] label,
+[data-testid="stSelectbox"] label {
+  display: none !important;
+  height: 0 !important;
+  min-height: 0 !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  overflow: hidden !important;
+  position: absolute !important;
+  width: 0 !important;
+  opacity: 0 !important;
+}
+
 [data-testid="stTextInput"] input,
-[data-testid="stNumberInput"] input,
-[data-testid="stSelectbox"] div[data-baseweb="select"] > div {
+[data-testid="stNumberInput"] input {
   background-color: var(--bg-input) !important;
   color: var(--text) !important;
   border: 1px solid var(--border) !important;
   border-radius: var(--radius) !important;
-  font-size: var(--fs-base) !important;
+  font-size: var(--fs-caption) !important;
+  font-weight: 400 !important;
+  height: var(--ctrl-h) !important;
+  min-height: var(--ctrl-h) !important;
+  max-height: var(--ctrl-h) !important;
+  padding: 0 9px !important;
+  box-sizing: border-box !important;
+  line-height: 1.35 !important;
+}
+[data-testid="stTextInput"] input:disabled,
+[data-testid="stNumberInput"] input:disabled,
+[data-testid="stTextInput"] input[disabled],
+[data-testid="stNumberInput"] input[disabled] {
+  font-weight: 400 !important;
+  -webkit-text-fill-color: var(--text) !important;
+  opacity: 0.9 !important;
+}
+
+/* select: BaseWeb 전역 — stSelectbox 래퍼에 의존하지 않음 */
+div[data-baseweb="select"] {
+  background-color: var(--bg-input) !important;
+  border: 1px solid var(--border) !important;
+  border-radius: var(--radius) !important;
+  box-shadow: none !important;
+  outline: none !important;
+  height: var(--ctrl-h) !important;
+  min-height: var(--ctrl-h) !important;
+  max-height: var(--ctrl-h) !important;
+  box-sizing: border-box !important;
+}
+
+div[data-baseweb="select"] > div {
+  background-color: transparent !important;
+  border: none !important;
+  box-shadow: none !important;
+  height: 100% !important;
+  min-height: 0 !important;
+  padding-top: 0 !important;
+  padding-bottom: 0 !important;
+  padding-left: 9px !important;
+  padding-right: 9px !important;
+  align-items: center !important;
+  box-sizing: border-box !important;
+}
+
+div[data-baseweb="select"] div,
+div[data-baseweb="select"] span,
+div[data-baseweb="select"] p {
+  font-size: var(--fs-caption) !important;
+  font-weight: 400 !important;
+  line-height: 1.35 !important;
+  color: var(--text) !important;
+}
+
+[data-testid="stSelectbox"] {
+  margin-top: 0 !important;
+  margin-bottom: 6px !important;
 }
 
 [data-testid="stNumberInput"] button {
