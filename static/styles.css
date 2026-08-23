@@ -375,6 +375,17 @@ div:has(> .report-dl-anchor) + div button:hover,
   border: none !important;
 }
 
+.file-unavailable {
+  margin: 4px 0 12px;
+  padding: 4px 0;
+  font-size: var(--fs-caption) !important;
+  line-height: 1.45 !important;
+  color: var(--text-dim);
+  pointer-events: none;
+  user-select: none;
+  cursor: default;
+}
+
 [data-testid="stTextInput"],
 [data-testid="stNumberInput"],
 [data-testid="stSelectbox"] {

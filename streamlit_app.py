@@ -191,6 +191,31 @@ def position_check_text() -> str:
     return f"만약 {cell}이/가 {thr} {cmp}이면, {inst} {qty}억 {side}"
 
 
+def render_file_section(
+    title: str,
+    path: Path | None = None,
+    label: str | None = None,
+    key: str = "",
+    mime: str = "application/pdf",
+) -> None:
+    with st.container(border=True):
+        section_head(title)
+        if path is not None and path.is_file():
+            st.markdown('<div class="report-dl-anchor"></div>', unsafe_allow_html=True)
+            st.download_button(
+                label=label or path.name,
+                data=path.read_bytes(),
+                file_name=path.name,
+                mime=mime,
+                key=key,
+            )
+        else:
+            st.markdown(
+                '<p class="file-unavailable">Not Available (별도 문의 부탁드립니다.)</p>',
+                unsafe_allow_html=True,
+            )
+
+
 def render_demo() -> None:
     with st.container(border=True):
         st.markdown(
@@ -218,22 +243,13 @@ def render_demo() -> None:
             unsafe_allow_html=True,
         )
 
-    with st.container(border=True):
-        section_head("Technical Report")
-        if REPORT_PATH.is_file():
-            st.markdown('<div class="report-dl-anchor"></div>', unsafe_allow_html=True)
-            st.download_button(
-                label=REPORT_NAME,
-                data=REPORT_PATH.read_bytes(),
-                file_name=REPORT_NAME,
-                mime="application/pdf",
-                key="btn_dl_report",
-            )
-        else:
-            st.markdown(
-                f'<p class="form-msg err">{html.escape(f"{REPORT_NAME} not found")}</p>',
-                unsafe_allow_html=True,
-            )
+    render_file_section(
+        "Technical Report",
+        REPORT_PATH,
+        REPORT_NAME,
+        "btn_dl_report",
+    )
+    render_file_section("Download")
 
 
 def render_profile() -> None:
@@ -400,7 +416,7 @@ def render_watcher() -> None:
         form_footer("settings", [("Save", "btn_save_settings")])
 
     with st.container(border=True):
-        section_head("Coordinate")
+        section_head("Calibration")
         d1, d2 = st.columns(2)
         with d1:
             field_label("Mode")
