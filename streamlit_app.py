@@ -13,7 +13,7 @@ CSS_PATH = ROOT / "static" / "styles.css"
 REPORT_NAME = "KBondWatcher_Technical_Report_v1.4.pdf"
 REPORT_PATH = ROOT / "attachment" / REPORT_NAME
 
-ENGINE_VERSION = "0.3.1"
+ENGINE_VERSION = "0.3.2"
 DEMO_MSG = "본 웹은 데모 시연용 웹입니다."
 DEMO_BANNER = "※ 본 웹은 데모 시연용 웹입니다. 다운로드 및 설치 후 실사용 가능합니다."
 COORD_IDLE = "'Set Click Position' 버튼 클릭 후 입력 좌표를 설정하세요."
