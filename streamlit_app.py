@@ -201,6 +201,7 @@ def render_file_section(
     key: str = "",
     mime: str = "application/pdf",
     kicker: str | None = None,
+    note: str | None = None,
 ) -> None:
     with st.container(border=True):
         if kicker:
@@ -223,6 +224,11 @@ def render_file_section(
         else:
             st.markdown(
                 '<p class="file-unavailable">Not Available</p>',
+                unsafe_allow_html=True,
+            )
+        if note:
+            st.markdown(
+                f'<p class="muted">{html.escape(note)}</p>',
                 unsafe_allow_html=True,
             )
 
@@ -268,6 +274,7 @@ def render_demo() -> None:
         "btn_dl_install",
         "application/zip",
         kicker="Last Update 2026-08-24",
+        note="위 배포 버전은 데모 버전으로, admin으로부터 별도 key를 받아 실행해야 합니다. 문의 부탁드립니다.",
     )
 
 
