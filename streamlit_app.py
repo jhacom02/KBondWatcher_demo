@@ -11,7 +11,7 @@ ROOT = Path(__file__).resolve().parent
 ATTACHMENT = ROOT / "attachment"
 VIDEO_PATH = ATTACHMENT / "video" / "2026-08-20_before_close_cut.mp4"
 CSS_PATH = ROOT / "static" / "styles.css"
-REPORT_NAME = "KBondWatcher_Technical_Report_v1.4.pdf"
+REPORT_NAME = "KBondWatcher_Technical_Report_v1.5.pdf"
 REPORT_PATH = ATTACHMENT / "report" / REPORT_NAME
 DOWNLOAD_NAME = "KBondWatcher-0.3.2.zip"
 DOWNLOAD_PATH = ATTACHMENT / "download" / DOWNLOAD_NAME
@@ -200,9 +200,17 @@ def render_file_section(
     label: str | None = None,
     key: str = "",
     mime: str = "application/pdf",
+    kicker: str | None = None,
 ) -> None:
     with st.container(border=True):
-        section_head(title)
+        if kicker:
+            st.markdown(
+                f'<div class="section-head"><h2>{html.escape(title)}</h2>'
+                f'<span class="demo-kicker">{html.escape(kicker)}</span></div>',
+                unsafe_allow_html=True,
+            )
+        else:
+            section_head(title)
         if path is not None and path.is_file():
             st.markdown('<div class="report-dl-anchor"></div>', unsafe_allow_html=True)
             st.download_button(
@@ -214,7 +222,7 @@ def render_file_section(
             )
         else:
             st.markdown(
-                '<p class="file-unavailable">Not Available (별도 문의 부탁드립니다.)</p>',
+                '<p class="file-unavailable">Not Available</p>',
                 unsafe_allow_html=True,
             )
 
@@ -251,6 +259,7 @@ def render_demo() -> None:
         REPORT_PATH,
         REPORT_NAME,
         "btn_dl_report",
+        kicker="Last Update 2026-08-24",
     )
     render_file_section(
         "Download",
@@ -258,6 +267,7 @@ def render_demo() -> None:
         DOWNLOAD_NAME,
         "btn_dl_install",
         "application/zip",
+        kicker="Last Update 2026-08-24",
     )
 
 
