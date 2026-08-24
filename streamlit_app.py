@@ -8,10 +8,13 @@ from pathlib import Path
 import streamlit as st
 
 ROOT = Path(__file__).resolve().parent
-VIDEO_PATH = ROOT / "attachment" / "2026-08-20_before_close_cut.mp4"
+ATTACHMENT = ROOT / "attachment"
+VIDEO_PATH = ATTACHMENT / "video" / "2026-08-20_before_close_cut.mp4"
 CSS_PATH = ROOT / "static" / "styles.css"
 REPORT_NAME = "KBondWatcher_Technical_Report_v1.4.pdf"
-REPORT_PATH = ROOT / "attachment" / REPORT_NAME
+REPORT_PATH = ATTACHMENT / "report" / REPORT_NAME
+DOWNLOAD_NAME = "KBondWatcher-0.3.2.zip"
+DOWNLOAD_PATH = ATTACHMENT / "download" / DOWNLOAD_NAME
 
 ENGINE_VERSION = "0.3.2"
 DEMO_MSG = "본 웹은 데모 시연용 웹입니다."
@@ -249,7 +252,13 @@ def render_demo() -> None:
         REPORT_NAME,
         "btn_dl_report",
     )
-    render_file_section("Download")
+    render_file_section(
+        "Download",
+        DOWNLOAD_PATH,
+        DOWNLOAD_NAME,
+        "btn_dl_install",
+        "application/zip",
+    )
 
 
 def render_profile() -> None:
