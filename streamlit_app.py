@@ -13,11 +13,11 @@ VIDEO_PATH = ATTACHMENT / "video" / "2026-08-20_before_close_cut.mp4"
 CSS_PATH = ROOT / "static" / "styles.css"
 REPORT_NAME = "KBondWatcher_Technical_Report_v1.5.pdf"
 REPORT_PATH = ATTACHMENT / "report" / REPORT_NAME
-DOWNLOAD_NAME = "KBondWatcher-0.3.3.zip"
+DOWNLOAD_NAME = "KBondWatcher-0.3.4.zip"
 DOWNLOAD_PATH = ATTACHMENT / "download" / DOWNLOAD_NAME
 
-ENGINE_VERSION = "0.3.3"
-DEMO_MSG = "본 웹은 데모 시연용 웹입니다."
+ENGINE_VERSION = "0.3.4"
+DEMO_MSG = "본 웹은 데모 시연용 웹이며, 별도 기능이 없습니다."
 DEMO_BANNER = "※ 본 웹은 데모 시연용 웹입니다. 다운로드 및 설치 후 실사용 가능합니다."
 COORD_IDLE = "'Set Click Position' 버튼 클릭 후 입력 좌표를 설정하세요."
 ALLOWED = ("25-10", "25-4", "25-8", "25-5", "25-11")
@@ -112,18 +112,34 @@ def form_footer(
     slot: str,
     buttons: list[tuple[str, str]],
     btn_w: float = 1,
+    buttons_left: bool = False,
+    show_msg: bool = True,
 ) -> list[bool]:
     n = len(buttons)
-    cols = st.columns([max(3, 8 - int(n * btn_w))] + [btn_w] * n)
+    leftover = max(3, 8 - int(n * btn_w))
+    if n == 0:
+        cols = st.columns([leftover])
+        btn_offset, msg_col = 0, 0
+    elif buttons_left:
+        cols = st.columns([btn_w] * n + [leftover])
+        btn_offset, msg_col = 0, n
+    else:
+        cols = st.columns([leftover] + [btn_w] * n)
+        btn_offset, msg_col = 1, 0
     clicks: list[bool] = []
     for i, (label, key) in enumerate(buttons):
-        with cols[i + 1]:
+        with cols[i + btn_offset]:
+            if key == "btn_start":
+                st.markdown('<div id="start-btn-anchor"></div>', unsafe_allow_html=True)
+            elif key == "btn_stop":
+                st.markdown('<div id="stop-btn-anchor"></div>', unsafe_allow_html=True)
             clicks.append(st.button(label, key=key, use_container_width=True))
     if any(clicks):
         flash(slot, DEMO_MSG, True)
-    with cols[0]:
-        st.markdown('<div class="form-footer-row"></div>', unsafe_allow_html=True)
-        render_msg(slot)
+    if show_msg:
+        with cols[msg_col]:
+            st.markdown('<div class="form-footer-row"></div>', unsafe_allow_html=True)
+            render_msg(slot)
     return clicks
 
 
@@ -273,7 +289,7 @@ def render_demo() -> None:
         DOWNLOAD_NAME,
         "btn_dl_install",
         "application/zip",
-        kicker="Last Update 2026-08-24",
+        kicker="Last Update 2026-08-25",
         note="위 배포 버전은 데모 버전으로, admin으로부터 별도 key를 받아 실행해야 합니다. 문의 부탁드립니다.",
     )
 
@@ -342,21 +358,17 @@ def render_watcher() -> None:
 
     with st.container(border=True):
         section_head("Status")
-        b1, b2, msg = st.columns([1, 1, 4])
-        with b1:
-            st.markdown('<div id="start-btn-anchor"></div>', unsafe_allow_html=True)
-            if st.button("START", key="btn_start", use_container_width=True):
-                flash("status", DEMO_MSG, True)
-        with b2:
-            st.markdown('<div id="stop-btn-anchor"></div>', unsafe_allow_html=True)
-            if st.button("STOP", key="btn_stop", use_container_width=True):
-                flash("status", DEMO_MSG, True)
-        with msg:
-            st.markdown('<div class="form-footer-row"></div>', unsafe_allow_html=True)
-            render_msg("status")
+        form_footer(
+            "status",
+            [("START", "btn_start"), ("STOP", "btn_stop")],
+            btn_w=1.5,
+            buttons_left=True,
+            show_msg=False,
+        )
         st.markdown(
             '<div class="status-grid">'
-            '<div class="lbl">Status</div><div class="val">STOPPED</div>'
+            '<div class="lbl">Status</div>'
+            '<div class="val val-state"><span class="state-pill state-stopped">STOPPED</span></div>'
             f'<div class="lbl">Target</div><div class="val">{html.escape(str(st.session_state.get("instrument", "25-10")))}</div>'
             f'<div class="lbl">Quantity</div><div class="val">{html.escape(str(qty))}</div>'
             f'<div class="lbl">Looking For</div><div class="val">{html.escape(str(st.session_state.get("looking_for", "BID")))}</div>'
@@ -367,6 +379,7 @@ def render_watcher() -> None:
             "</div>",
             unsafe_allow_html=True,
         )
+        form_footer("status", [])
     with st.container(border=True):
         if section_head("Settings", "btn_settings_revert"):
             reset_settings()
