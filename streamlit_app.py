@@ -17,8 +17,8 @@ DOWNLOAD_NAME = "KBondWatcher-0.3.4.zip"
 DOWNLOAD_PATH = ATTACHMENT / "download" / DOWNLOAD_NAME
 
 ENGINE_VERSION = "0.3.4"
-DEMO_MSG = "본 웹은 데모 시연용 웹이며, 별도 기능이 없습니다."
-DEMO_BANNER = "※ 본 웹은 데모 시연용 웹입니다. 다운로드 및 설치 후 실사용 가능합니다."
+DEMO_MSG = "※ 본 웹은 데모 시연용 웹이며, 다운로드 및 설치 후 실사용 가능합니다."
+DEMO_BANNER = "※ 본 웹은 데모 시연용 웹이며, 다운로드 및 설치 후 실사용 가능합니다."
 COORD_IDLE = "'Set Click Position' 버튼 클릭 후 입력 좌표를 설정하세요."
 ALLOWED = ("25-10", "25-4", "25-8", "25-5", "25-11")
 MODE_OPTIONS = (
@@ -26,13 +26,13 @@ MODE_OPTIONS = (
     "2 - KBond / Notepad",
     "3 - Forest / Notepad",
 )
-PROFILE_KEYS = (
-    "profile_name",
-    "kbond_chat_title",
-    "excel_workbook",
-    "excel_sheet",
-    "mode",
-    "sent_after",
+PROFILE_DRAFT_KEYS = (
+    "draft_profile_name",
+    "draft_kbond_chat_title",
+    "draft_excel_workbook",
+    "draft_excel_sheet",
+    "draft_mode",
+    "draft_sent_after",
 )
 SETTINGS_KEYS = (
     "instrument",
@@ -52,7 +52,7 @@ st.set_page_config(
 )
 
 
-def _defaults() -> dict:
+def applied_profile() -> dict:
     return {
         "profile_name": "Hannah",
         "kbond_chat_title": "[채권] 블커본드",
@@ -60,6 +60,17 @@ def _defaults() -> dict:
         "excel_sheet": "Main",
         "mode": MODE_OPTIONS[1],
         "sent_after": "one-shot",
+    }
+
+
+def _defaults() -> dict:
+    return {
+        "draft_profile_name": "",
+        "draft_kbond_chat_title": "",
+        "draft_excel_workbook": "",
+        "draft_excel_sheet": "",
+        "draft_mode": MODE_OPTIONS[1],
+        "draft_sent_after": "one-shot",
         "instrument": "25-10",
         "required_qty": 100,
         "looking_for": "BID",
@@ -82,9 +93,14 @@ def _defaults() -> dict:
 
 
 def init_state() -> None:
-    for key, value in _defaults().items():
+    defaults = _defaults()
+    for key, value in defaults.items():
         if key not in st.session_state:
             st.session_state[key] = value
+    if st.session_state.get("draft_mode") not in MODE_OPTIONS:
+        st.session_state.draft_mode = MODE_OPTIONS[1]
+    if st.session_state.get("draft_sent_after") not in ("one-shot", "loop"):
+        st.session_state.draft_sent_after = "one-shot"
 
 
 def inject_css() -> None:
@@ -106,6 +122,13 @@ def render_msg(slot: str) -> None:
 def field_label(text: str, required: bool = False) -> None:
     req = ' <span class="req">*</span>' if required else ""
     st.markdown(f'<div class="field-label">{html.escape(text)}{req}</div>', unsafe_allow_html=True)
+
+
+def readonly_box(value: str) -> None:
+    st.markdown(
+        f'<div class="readonly-input">{html.escape(str(value))}</div>',
+        unsafe_allow_html=True,
+    )
 
 
 def form_footer(
@@ -143,10 +166,16 @@ def form_footer(
     return clicks
 
 
-def section_head(title_html: str, revert_key: str | None = None, btn_cols: int = 2) -> bool:
+def section_head(
+    title_html: str,
+    revert_key: str | None = None,
+    btn_cols: int = 2,
+    pad: bool = False,
+) -> bool:
+    head_cls = "section-head section-head-pad" if pad else "section-head"
     if revert_key is None:
         st.markdown(
-            f'<div class="section-head"><h2>{title_html}</h2></div>',
+            f'<div class="{head_cls}"><h2>{title_html}</h2></div>',
             unsafe_allow_html=True,
         )
         return False
@@ -168,7 +197,7 @@ def reset_keys(keys: tuple[str, ...]) -> None:
 
 
 def reset_profile() -> None:
-    reset_keys(PROFILE_KEYS)
+    reset_keys(PROFILE_DRAFT_KEYS)
 
 
 def reset_settings() -> None:
@@ -176,7 +205,7 @@ def reset_settings() -> None:
 
 
 def mode_number() -> int:
-    mode = str(st.session_state.get("mode", MODE_OPTIONS[1]))
+    mode = str(applied_profile().get("mode", MODE_OPTIONS[1]))
     try:
         return int(mode[0])
     except (TypeError, ValueError, IndexError):
@@ -186,7 +215,7 @@ def mode_number() -> int:
 def click_window_label() -> str:
     n = mode_number()
     if n == 1:
-        return (st.session_state.get("kbond_chat_title") or "").strip() or "KBond"
+        return (applied_profile().get("kbond_chat_title") or "").strip() or "KBond"
     if n in (2, 3):
         return "Notepad"
     return "—"
@@ -257,7 +286,7 @@ def render_demo() -> None:
             unsafe_allow_html=True,
         )
         st.markdown(
-            '<p class="muted">본 영상은 웹이 아닌 엑셀을 인터페이스로 한 것이며, 루프 반복 실행한 결과입니다. (Mode: 3, Loop: loop)</p>',
+            '<p class="muted">본 영상은 엑셀을 인터페이스로 하여 루프를 반복 실행한 영상입니다. (Mode: 2, Loop: loop)</p>',
             unsafe_allow_html=True,
         )
         if VIDEO_PATH.is_file():
@@ -289,65 +318,105 @@ def render_demo() -> None:
         DOWNLOAD_NAME,
         "btn_dl_install",
         "application/zip",
-        kicker="Last Update 2026-08-25",
-        note="위 배포 버전은 데모 버전으로, admin으로부터 별도 key를 받아 실행해야 합니다. 문의 부탁드립니다.",
+        kicker="Last Update 2026-08-26",
+        note="위 배포 버전은 데모 버전으로, admin으로부터 별도 key를 받아 실행해야 합니다.",
     )
 
 
 def render_profile() -> None:
-    if mode_number() == 1:
-        st.session_state.sent_after = "one-shot"
+    draft_mode = str(st.session_state.get("draft_mode") or "")
+    if draft_mode.startswith("1"):
+        st.session_state.draft_sent_after = "one-shot"
+
+    ap = applied_profile()
+    with st.container(border=True):
+        section_head("Applied Profile", pad=True)
+        a1, a2 = st.columns(2)
+        with a1:
+            field_label("Name")
+            readonly_box(ap["profile_name"])
+        with a2:
+            field_label("KBond Chat Title")
+            readonly_box(ap["kbond_chat_title"])
+        a3, a4 = st.columns(2)
+        with a3:
+            field_label("Excel Directory")
+            readonly_box(ap["excel_workbook"])
+        with a4:
+            field_label("Sheet Name")
+            readonly_box(ap["excel_sheet"])
+        a5, a6 = st.columns(2)
+        with a5:
+            field_label("Mode")
+            readonly_box(ap["mode"])
+        with a6:
+            field_label("Loop")
+            readonly_box(ap["sent_after"])
 
     with st.container(border=True):
         if section_head(
-            'Profile - <span class="auth-label">Not Authorized</span>',
+            'Submit Profile - <span class="auth-label">Not Authorized</span>',
             "btn_profile_revert",
         ):
             reset_profile()
-            flash("profile", DEMO_MSG, True)
             st.rerun()
 
         c1, c2 = st.columns(2)
         with c1:
             field_label("Name", True)
-            st.text_input("profile_name", key="profile_name", label_visibility="collapsed")
+            st.text_input(
+                "draft_profile_name",
+                key="draft_profile_name",
+                label_visibility="collapsed",
+            )
         with c2:
             field_label("KBond Chat Title", True)
             st.text_input(
-                "kbond_chat_title", key="kbond_chat_title", label_visibility="collapsed"
+                "draft_kbond_chat_title",
+                key="draft_kbond_chat_title",
+                label_visibility="collapsed",
             )
 
         c3, c4 = st.columns(2)
         with c3:
             field_label("Excel Directory", True)
             st.text_input(
-                "excel_workbook",
-                key="excel_workbook",
+                "draft_excel_workbook",
+                key="draft_excel_workbook",
                 label_visibility="collapsed",
                 placeholder="FullName path",
             )
         with c4:
             field_label("Sheet Name", True)
-            st.text_input("excel_sheet", key="excel_sheet", label_visibility="collapsed")
+            st.text_input(
+                "draft_excel_sheet",
+                key="draft_excel_sheet",
+                label_visibility="collapsed",
+            )
 
         c5, c6 = st.columns(2)
         with c5:
             field_label("Mode", True)
-            st.selectbox("mode", MODE_OPTIONS, key="mode", label_visibility="collapsed")
+            st.selectbox(
+                "draft_mode",
+                MODE_OPTIONS,
+                key="draft_mode",
+                label_visibility="collapsed",
+            )
         with c6:
             field_label("Loop", True)
             st.selectbox(
-                "sent_after",
+                "draft_sent_after",
                 ("one-shot", "loop"),
-                key="sent_after",
+                key="draft_sent_after",
                 label_visibility="collapsed",
-                disabled=(mode_number() == 1),
+                disabled=str(st.session_state.get("draft_mode") or "").startswith("1"),
                 help="Mode 1 uses one-shot only",
             )
 
         form_footer(
             "profile",
-            [("Save", "btn_save_profile"), ("Submit", "btn_submit_profile")],
+            [("Save Draft", "btn_save_profile"), ("Submit", "btn_submit_profile")],
         )
 
 
@@ -367,14 +436,14 @@ def render_watcher() -> None:
         )
         st.markdown(
             '<div class="status-grid">'
-            '<div class="lbl">Status</div>'
+            '<div class="lbl">State</div>'
             '<div class="val val-state"><span class="state-pill state-stopped">STOPPED</span></div>'
             f'<div class="lbl">Target</div><div class="val">{html.escape(str(st.session_state.get("instrument", "25-10")))}</div>'
             f'<div class="lbl">Quantity</div><div class="val">{html.escape(str(qty))}</div>'
             f'<div class="lbl">Looking For</div><div class="val">{html.escape(str(st.session_state.get("looking_for", "BID")))}</div>'
             f'<div class="lbl">Threshold</div><div class="val">{html.escape(thr)}</div>'
             '<div class="lbl">Last Quote</div><div class="val">25-10 74+</div>'
-            f'<div class="lbl">Last Calculation</div><div class="val">{html.escape(last_calc)}</div>'
+            f'<div class="lbl">Last Output</div><div class="val">{html.escape(last_calc)}</div>'
             '<div class="lbl">Last Action</div><div class="val">(16:05:16) Message Sent: 25-10 74- ㅎㅈ</div>'
             "</div>",
             unsafe_allow_html=True,
@@ -459,16 +528,10 @@ def render_watcher() -> None:
         d1, d2 = st.columns(2)
         with d1:
             field_label("Mode")
-            st.markdown(
-                f'<div class="readonly-input">{html.escape(str(mode_number()))}</div>',
-                unsafe_allow_html=True,
-            )
+            readonly_box(str(mode_number()))
         with d2:
             field_label("Click Window")
-            st.markdown(
-                f'<div class="readonly-input">{html.escape(click_window_label())}</div>',
-                unsafe_allow_html=True,
-            )
+            readonly_box(click_window_label())
         d3, d4 = st.columns(2)
         with d3:
             field_label("X")

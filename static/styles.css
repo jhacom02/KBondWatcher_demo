@@ -81,6 +81,9 @@ h2 {
   gap: 12px;
   margin-bottom: 4px;
 }
+.section-head-pad {
+  margin-bottom: 16px;
+}
 .section-head h2 { margin: 0; }
 
 .auth-label {
@@ -93,7 +96,7 @@ h2 {
   font-size: var(--fs-caption) !important;
   font-weight: 400 !important;
   color: var(--text-muted);
-  margin: 14px 0 10px;
+  margin: 2px 0 10px;
   line-height: 1.35;
   display: block;
   min-height: 1.35em;
@@ -221,7 +224,15 @@ div[data-testid="stHorizontalBlock"]:has(.form-footer-row) {
   opacity: 0.85;
   word-break: break-word;
   margin-top: 0;
-  margin-bottom: 6px;
+  margin-bottom: 4px;
+}
+[data-testid="stElementContainer"]:has(.readonly-input),
+[data-testid="stMarkdown"]:has(.readonly-input),
+[data-testid="stMarkdownContainer"]:has(.readonly-input) {
+  margin-top: 0 !important;
+  margin-bottom: 0 !important;
+  padding-top: 0 !important;
+  padding-bottom: 0 !important;
 }
 
 .footer-meta {
@@ -403,7 +414,7 @@ div:has(> .report-dl-anchor) + div button:hover,
 [data-testid="stNumberInput"],
 [data-testid="stSelectbox"] {
   margin-top: 0 !important;
-  margin-bottom: 6px !important;
+  margin-bottom: 4px !important;
 }
 
 [data-testid="stWidgetLabel"],
@@ -445,7 +456,6 @@ div:has(> .report-dl-anchor) + div button:hover,
   opacity: 0.9 !important;
 }
 
-/* select: BaseWeb 전역 — stSelectbox 래퍼에 의존하지 않음 */
 div[data-baseweb="select"] {
   background-color: var(--bg-input) !important;
   border: 1px solid var(--border) !important;
@@ -483,7 +493,7 @@ div[data-baseweb="select"] p {
 
 [data-testid="stSelectbox"] {
   margin-top: 0 !important;
-  margin-bottom: 6px !important;
+  margin-bottom: 4px !important;
 }
 
 [data-testid="stNumberInput"] button {

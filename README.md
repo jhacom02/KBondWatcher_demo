@@ -5,7 +5,6 @@ KBondWatcher 데모 시연용 웹페이지입니다. 다운로드 및 설치 문
 ## 로컬 실행
 
 ```bash
-pip install -r requirements.txt
 streamlit run streamlit_app.py
 ```
 
