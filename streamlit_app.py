@@ -325,7 +325,7 @@ def render_demo() -> None:
         DOWNLOAD_NAME,
         "btn_dl_install",
         "application/zip",
-        kicker="Last Update 2026-08-26",
+        kicker="Last Update 2026-08-27",
         note="위 배포 버전은 데모 버전으로, admin으로부터 별도 key를 받아 실행해야 합니다.",
     )
 
