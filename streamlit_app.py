@@ -13,10 +13,10 @@ VIDEO_PATH = ATTACHMENT / "video" / "2026-08-20_before_close_cut.mp4"
 CSS_PATH = ROOT / "static" / "styles.css"
 REPORT_NAME = "KBondWatcher_Technical_Report_v1.5.pdf"
 REPORT_PATH = ATTACHMENT / "report" / REPORT_NAME
-DOWNLOAD_NAME = "KBondWatcher-0.3.4.zip"
+DOWNLOAD_NAME = "KBondWatcher-0.3.5.zip"
 DOWNLOAD_PATH = ATTACHMENT / "download" / DOWNLOAD_NAME
 
-ENGINE_VERSION = "0.3.4"
+ENGINE_VERSION = "0.3.5"
 DEMO_MSG = "※ 본 웹은 데모 시연용 웹이며, 다운로드 및 설치 후 실사용 가능합니다."
 DEMO_BANNER = "※ 본 웹은 데모 시연용 웹이며, 다운로드 및 설치 후 실사용 가능합니다."
 COORD_IDLE = "'Set Click Position' 버튼 클릭 후 입력 좌표를 설정하세요."
@@ -127,6 +127,13 @@ def field_label(text: str, required: bool = False) -> None:
 def readonly_box(value: str) -> None:
     st.markdown(
         f'<div class="readonly-input">{html.escape(str(value))}</div>',
+        unsafe_allow_html=True,
+    )
+
+
+def tab_notes(*lines: str) -> None:
+    st.markdown(
+        "".join(f'<p class="flash msg">{html.escape(line)}</p>' for line in lines),
         unsafe_allow_html=True,
     )
 
@@ -324,6 +331,11 @@ def render_demo() -> None:
 
 
 def render_profile() -> None:
+    tab_notes(
+        "※ Applied Profile에 보이는 값이 현재 적용되고 있는 값입니다.",
+        "※ Submit Profile 작성 후 Save Draft 클릭 시 로컬에 저장되며, Submit 클릭 시 어드민에게 승인 요청이 전송됩니다.",
+        "※ 프로필 승인까지는 시간이 걸릴 수 있으며, Submit Profile - Authorized 상태가 되면 Applied Profile에 적용됩니다.",
+    )
     draft_mode = str(st.session_state.get("draft_mode") or "")
     if draft_mode.startswith("1"):
         st.session_state.draft_sent_after = "one-shot"
@@ -421,6 +433,11 @@ def render_profile() -> None:
 
 
 def render_watcher() -> None:
+    tab_notes(
+        "※ 반드시 Settings와 Calibration 설정을 먼저 완료한 후 시작해주세요.",
+        "※ Input Cell은 호가를 key-in할 셀, Output Cell은 threhold와 비교할 셀을 의미합니다.",
+        "※ 탭을 새로고침·닫거나 KBond·Excel(·Notepad)를 닫으면 감시가 중단됩니다.",
+    )
     thr = fmt_threshold(st.session_state.get("threshold", -1000000))
     qty = st.session_state.get("required_qty", 100)
     last_calc = fmt_threshold(-1458910)

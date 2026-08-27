@@ -67,7 +67,7 @@ h2 {
 
 .flash {
   min-height: 0.6em;
-  margin: 10px 0 12px;
+  margin: 0 0 12px;
   font-size: var(--fs-caption) !important;
   line-height: 1.45;
 }
@@ -153,6 +153,13 @@ div[data-testid="stHorizontalBlock"]:has(.form-footer-row) {
   min-height: 32px;
   color: var(--text);
   font-size: var(--fs-caption) !important;
+}
+.status-grid .val:not(.val-state) {
+  color: var(--text-dim);
+  background: #0a0e13;
+  cursor: not-allowed;
+  pointer-events: none;
+  opacity: 0.85;
 }
 .status-grid .val.val-state {
   display: flex;
