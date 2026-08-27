@@ -13,10 +13,10 @@ VIDEO_PATH = ATTACHMENT / "video" / "2026-08-20_before_close_cut.mp4"
 CSS_PATH = ROOT / "static" / "styles.css"
 REPORT_NAME = "KBondWatcher_Technical_Report_v1.5.pdf"
 REPORT_PATH = ATTACHMENT / "report" / REPORT_NAME
-DOWNLOAD_NAME = "KBondWatcher-0.3.5.zip"
+DOWNLOAD_NAME = "KBondWatcher-0.3.6.zip"
 DOWNLOAD_PATH = ATTACHMENT / "download" / DOWNLOAD_NAME
 
-ENGINE_VERSION = "0.3.5"
+ENGINE_VERSION = "0.3.6"
 DEMO_MSG = "※ 본 웹은 데모 시연용 웹이며, 다운로드 및 설치 후 실사용 가능합니다."
 DEMO_BANNER = "※ 본 웹은 데모 시연용 웹이며, 다운로드 및 설치 후 실사용 가능합니다."
 COORD_IDLE = "'Set Click Position' 버튼 클릭 후 입력 좌표를 설정하세요."
@@ -335,6 +335,7 @@ def render_profile() -> None:
         "※ Applied Profile에 보이는 값이 현재 적용되고 있는 값입니다.",
         "※ Submit Profile 작성 후 Save Draft 클릭 시 로컬에 저장되며, Submit 클릭 시 어드민에게 승인 요청이 전송됩니다.",
         "※ 프로필 승인까지는 시간이 걸릴 수 있으며, Submit Profile - Authorized 상태가 되면 Applied Profile에 적용됩니다.",
+        "※ 엑셀이 '자동 계산'으로 설정되어 있어야 정상적으로 작동합니다.",
     )
     draft_mode = str(st.session_state.get("draft_mode") or "")
     if draft_mode.startswith("1"):
