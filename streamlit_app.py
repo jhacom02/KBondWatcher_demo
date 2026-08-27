@@ -326,7 +326,7 @@ def render_demo() -> None:
         "btn_dl_install",
         "application/zip",
         kicker="Last Update 2026-08-27",
-        note="위 배포 버전은 데모 버전으로, admin으로부터 별도 key를 받아 실행해야 합니다.",
+        note="※ 위 배포 버전은 데모 버전으로, 어드민으로부터 별도 key를 받아 실행해야 합니다.",
     )
 
 
@@ -437,6 +437,7 @@ def render_watcher() -> None:
         "※ 반드시 Settings와 Calibration 설정을 먼저 완료한 후 시작해주세요.",
         "※ Input Cell은 호가를 key-in할 셀, Output Cell은 threhold와 비교할 셀을 의미합니다.",
         "※ 탭을 새로고침·닫거나 KBond·Excel(·Notepad)를 닫으면 감시가 중단됩니다.",
+        "※ 데모 버전은 ‘중단 없는 안정적 구동’보다 ‘잘못된 주문 전송 방지’를 우선하기에 ERROR 발생 빈도가 높을 수 있습니다.",
     )
     thr = fmt_threshold(st.session_state.get("threshold", -1000000))
     qty = st.session_state.get("required_qty", 100)
@@ -610,7 +611,7 @@ def main() -> None:
         render_watcher()
 
     st.markdown(
-        f'<div class="footer-meta">KBondWatcher (2026) · Engine Version {ENGINE_VERSION} · by jhacom02</div>',
+        f'<div class="footer-meta">KBondWatcher (2026) · Engine Version {ENGINE_VERSION} · by jhacom02@gmail.com</div>',
         unsafe_allow_html=True,
     )
 
