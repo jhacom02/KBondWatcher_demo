@@ -13,10 +13,10 @@ VIDEO_PATH = ATTACHMENT / "video" / "2026-08-20_before_close_cut.mp4"
 CSS_PATH = ROOT / "static" / "styles.css"
 REPORT_NAME = "KBondWatcher_Technical_Report_v1.5.pdf"
 REPORT_PATH = ATTACHMENT / "report" / REPORT_NAME
-DOWNLOAD_NAME = "KBondWatcher-0.3.6.zip"
+DOWNLOAD_NAME = "KBondWatcher-0.3.7.zip"
 DOWNLOAD_PATH = ATTACHMENT / "download" / DOWNLOAD_NAME
 
-ENGINE_VERSION = "0.3.6"
+ENGINE_VERSION = "0.3.7"
 DEMO_MSG = "※ 본 웹은 데모 시연용 웹이며, 다운로드 및 설치 후 실사용 가능합니다."
 DEMO_BANNER = "※ 본 웹은 데모 시연용 웹이며, 다운로드 및 설치 후 실사용 가능합니다."
 COORD_IDLE = "'Set Click Position' 버튼 클릭 후 입력 좌표를 설정하세요."
@@ -325,8 +325,8 @@ def render_demo() -> None:
         DOWNLOAD_NAME,
         "btn_dl_install",
         "application/zip",
-        kicker="Last Update 2026-08-27",
-        note="※ 위 배포 버전은 데모 버전으로, 어드민으로부터 별도 key를 받아 실행해야 합니다.",
+        kicker="Last Update 2026-08-31",
+        note="※ 위 배포 버전은 데모 버전으로, 업데이트 날짜로부터 7일간 유효합니다.",
     )
 
 
