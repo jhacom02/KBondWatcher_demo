@@ -445,9 +445,9 @@ def render_profile() -> None:
 def render_watcher() -> None:
     tab_notes(
         "※ 반드시 Settings와 Calibration 설정을 먼저 완료한 후 시작해주세요.",
-        "※ Input Cell은 호가를 key-in할 셀, Output Cell은 threhold와 비교할 셀을 의미합니다.",
+        "※ Input Cell은 호가를 key-in할 셀, Output Cell은 threhold와 비교할 계산 결과 셀을 의미합니다.",
         "※ 탭을 새로고침·닫거나 KBond·Excel(·Notepad)를 닫으면 감시가 중단됩니다.",
-        "※ 데모 버전은 ‘중단 없는 안정적 구동’보다 ‘잘못된 주문 전송 방지’를 우선하기에 ERROR 발생 빈도가 높을 수 있습니다.",
+        "※ 데모 버전은 ‘중단 없는 구동’보다 ‘오전송 방지’를 우선한 fast-fail 원칙을 적용하기에 ERROR 발생 빈도가 높을 수 있습니다.",
     )
     thr = fmt_threshold(st.session_state.get("threshold", -1000000))
     qty = st.session_state.get("required_qty", 100)
