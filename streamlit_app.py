@@ -280,7 +280,7 @@ def render_file_section(
             )
         if note:
             st.markdown(
-                f'<p class="muted">{html.escape(note)}</p>',
+                f'<p class="muted">{html.escape(note).replace(chr(10), "<br>")}</p>',
                 unsafe_allow_html=True,
             )
 
@@ -325,8 +325,17 @@ def render_demo() -> None:
         DOWNLOAD_NAME,
         "btn_dl_install",
         "application/zip",
-        kicker="Last Update 2026-08-31",
-        note="※ 위 배포 버전은 데모 버전으로, 업데이트 날짜로부터 7일간 유효합니다.",
+        kicker="Last Update 2026-09-02",
+        note=(
+            "※ KBondWatcher 설치 및 실행 매뉴얼\n\n"
+            "1. ZIP 폴더 다운로드 후 압축 해제.\n"
+            "2. Excel, KBond, 메모장 등 필수 프로그램 실행.\n"
+            "3. 폴더 내 start.bat 더블클릭 (편한 곳에 바로가기 생성).\n"
+            "4. Profile 탭 → Submit Profile 입력 → Submit → 관리자 승인.\n"
+            "5. Watcher 탭 → Settings, Calibration 입력 → Save.\n"
+            "6. Status → START 클릭 (State: WATCHING 뜨면 정상).\n\n"
+            "※ 위 배포 버전은 데모 버전으로, 마지막 업데이트 날짜로부터 7일간 유효합니다.\n"
+        ),
     )
 
 
