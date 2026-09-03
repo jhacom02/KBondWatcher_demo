@@ -13,12 +13,12 @@ VIDEO_PATH = ATTACHMENT / "video" / "2026-08-20_before_close_cut.mp4"
 CSS_PATH = ROOT / "static" / "styles.css"
 REPORT_NAME = "KBondWatcher_Technical_Report_v1.5.pdf"
 REPORT_PATH = ATTACHMENT / "report" / REPORT_NAME
-DOWNLOAD_NAME = "KBondWatcher-0.3.7.zip"
+DOWNLOAD_NAME = "KBondWatcher-0.3.8.zip"
 DOWNLOAD_PATH = ATTACHMENT / "download" / DOWNLOAD_NAME
 
-ENGINE_VERSION = "0.3.7"
-DEMO_MSG = "※ 본 웹은 데모 시연용 웹이며, 다운로드 및 설치 후 실사용 가능합니다."
-DEMO_BANNER = "※ 본 웹은 데모 시연용 웹이며, 다운로드 및 설치 후 실사용 가능합니다."
+ENGINE_VERSION = "0.3.8"
+DEMO_MSG = "※ 본 웹은 데모 시연용 웹이며, 다운로드 후 실제 사용이 가능합니다."
+DEMO_BANNER = "※ 본 웹은 데모 시연용 웹이며, 다운로드 후 실제 사용이 가능합니다."
 COORD_IDLE = "'Set Click Position' 버튼 클릭 후 입력 좌표를 설정하세요."
 ALLOWED = ("25-10", "25-4", "25-8", "25-5", "25-11")
 MODE_OPTIONS = (
@@ -325,27 +325,20 @@ def render_demo() -> None:
         DOWNLOAD_NAME,
         "btn_dl_install",
         "application/zip",
-        kicker="Last Update 2026-09-02",
+        kicker="Last Update 2026-09-04",
         note=(
-            "※ KBondWatcher 설치 및 실행 매뉴얼\n\n"
+            "※ KBondWatcher 실행 매뉴얼\n\n"
             "1. ZIP 폴더 다운로드 후 압축 해제.\n"
             "2. Excel, KBond, 메모장 등 필수 프로그램 실행.\n"
-            "3. 폴더 내 start.bat 더블클릭 (편한 곳에 바로가기 생성).\n"
-            "4. Profile 탭 → Submit Profile 입력 → Submit → 관리자 승인.\n"
-            "5. Watcher 탭 → Settings, Calibration 입력 → Save.\n"
-            "6. Status → START 클릭 (State: WATCHING 뜨면 정상).\n\n"
-            "※ 위 배포 버전은 데모 버전으로, 마지막 업데이트 날짜로부터 7일간 유효합니다.\n"
+            "3. 폴더 내 start.bat 더블클릭.\n"
+            "4. Profile 탭 → Submit Profile 입력 → 관리자 승인.\n"
+            "5. Watcher 탭 → Settings, Calibration 설정 → START 클릭.\n\n"
+            "※ 자세한 매뉴얼은 폴더 내 README.md 파일을 참고해주세요.\n"
         ),
     )
 
 
 def render_profile() -> None:
-    tab_notes(
-        "※ Applied Profile에 보이는 값이 현재 적용되고 있는 값입니다.",
-        "※ Submit Profile 작성 후 Save Draft 클릭 시 로컬에 저장되며, Submit 클릭 시 어드민에게 승인 요청이 전송됩니다.",
-        "※ 프로필 승인까지는 시간이 걸릴 수 있으며, Submit Profile - Authorized 상태가 되면 Applied Profile에 적용됩니다.",
-        "※ 엑셀이 '자동 계산'으로 설정되어 있어야 정상적으로 작동합니다.",
-    )
     draft_mode = str(st.session_state.get("draft_mode") or "")
     if draft_mode.startswith("1"):
         st.session_state.draft_sent_after = "one-shot"
@@ -443,12 +436,6 @@ def render_profile() -> None:
 
 
 def render_watcher() -> None:
-    tab_notes(
-        "※ 반드시 Settings와 Calibration 설정을 먼저 완료한 후 시작해주세요.",
-        "※ Input Cell은 호가를 key-in할 셀, Output Cell은 threhold와 비교할 계산 결과 셀을 의미합니다.",
-        "※ 탭을 새로고침·닫거나 KBond·Excel(·Notepad)를 닫으면 감시가 중단됩니다.",
-        "※ 데모 버전은 ‘중단 없는 구동’보다 ‘오전송 방지’를 우선한 fast-fail 원칙을 적용하기에 ERROR 발생 빈도가 높을 수 있습니다.",
-    )
     thr = fmt_threshold(st.session_state.get("threshold", -1000000))
     qty = st.session_state.get("required_qty", 100)
     last_calc = fmt_threshold(-1458910)
